@@ -314,10 +314,13 @@ command = "herdr-suite.list"
 
 Action output lands in `herdr plugin log herdr-suite`.
 
-Two gaps are documented rather than worked around. `bin/hs` is a release
-artifact and `bin/` is gitignored, so a checkout carries no binary, and herdr
-runs no build on `herdr plugin link` or on install: `make hs` builds `bin/hs`
-in a working tree, and every action and pane above expects exactly that path.
+Two facts are documented rather than worked around. On `herdr plugin
+install` (and on update) the `[[build]]` hook runs `bin/ensure-binary.sh
+--in-tree`, which builds `bin/hs` with a local Go toolchain and falls back to
+the prebuilt `hs-<os>-<arch>` release asset once tag v0.1.0 publishes; until
+then a machine without Go builds nothing, and `herdr plugin link` runs no
+build at all, so a working tree uses `make hs` — every action and pane above
+expects exactly that path.
 And inside herdr, runtime commands run with the plugin directory as their working
 directory, so project discovery there needs `--dir <path>`; herdr reports no
 project directory to a plugin command, so guessing one would be wrong.

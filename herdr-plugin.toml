@@ -8,13 +8,17 @@ min_herdr_version = "0.7.5"
 description = "Session and space management for herdr: switch named sessions, then snapshot and restore workspace layouts"
 platforms = ["linux", "macos"]
 
+build = [
+  { command = ["bash", "bin/ensure-binary.sh", "--in-tree"] }
+]
+
 startup = []
 events = []
 
-# Every command resolves the hs binary in this plugin's own bin/ directory, the
-# way herdr-bar resolves bin/herdr-bar. No install hook downloads it yet: the
-# release workflow publishes hs-<os>-<arch> on a v* tag, and a working tree
-# builds bin/hs with "make hs" (see the README).
+# The [[build]] hook provisions bin/hs on every install and update: it builds
+# with a local Go toolchain and falls back to the prebuilt hs-<os>-<arch>
+# release binary verified against the tag (the herdr-agent-usage pattern).
+# `herdr plugin link` runs no build, so a working tree uses "make hs".
 [[actions]]
 id = "save"
 title = "Save space"

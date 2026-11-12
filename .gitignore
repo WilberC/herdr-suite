@@ -1,2 +1,4 @@
-/bin/
+bin/hs
+bin/hs.download
+bin/hs-*
 /dist/
