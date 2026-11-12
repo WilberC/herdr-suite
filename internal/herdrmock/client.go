@@ -6,6 +6,7 @@ import "context"
 type Session struct {
 	Name    string
 	Running bool
+	Default bool
 }
 
 // Pane is one terminal pane inside a tab.
@@ -64,12 +65,18 @@ type Call struct {
 	Target string
 }
 
-// Client is the minimal herdr surface herdr-suite depends on. Production code
-// talks to the real herdr CLI through this interface; tests use Fake.
-type Client interface {
+// SessionClient is the part of Client that session management needs: it lists
+// sessions and changes their lifecycle. Production code talks to the real herdr
+// CLI through this interface; tests use Fake.
+type SessionClient interface {
 	ListSessions(ctx context.Context) ([]Session, error)
 	StopSession(ctx context.Context, name string) error
 	DeleteSession(ctx context.Context, name string) error
+}
+
+// Client is the minimal herdr surface herdr-suite depends on.
+type Client interface {
+	SessionClient
 	Workspace(ctx context.Context, workspaceID string) (Workspace, error)
 	Pane(ctx context.Context, paneID string) (Pane, error)
 	SplitPane(ctx context.Context, req SplitRequest) (string, error)
