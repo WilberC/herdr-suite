@@ -1,0 +1,40 @@
+# herdr-suite — session & space management for herdr
+
+Go + Bubbletea CLI/plugin that manages herdr sessions and snapshot-restores
+workspace layouts. Replaces `herdr-sessionizer` (`hs`) as the `hs` command.
+Planned as its own GitHub plugin repo (`WilberC/herdr-suite`, initially
+private), topic `herdr-plugin`, distributed like herdr-bar (release binaries +
+SHA256SUMS, build-from-source fallback).
+
+## Specs
+
+- S1 (T1-T7): User: "es que esta fase no es un mvp, es algo que va a quedar fijo y una utilidad que debe ser segura y escalable" — production quality from day one: focused deterministic tests per behavior, offline tests with herdr CLI/socket stubs (pattern: herdr-plugin-manager `tests/run.sh`), no placeholder code shipped.
+- S2 (T1-T7): User: "Una herramientas que gestione sesiones como el hs, que pueda guardar distribucion y restaurarla, etc y que todas esas funcionalidades sean un solo paquete" — one Go codebase exposing two surfaces: CLI (runs outside herdr) and herdr plugin actions (run inside herdr). User: "que sea modular primero ... primero todas esas funcionalidades de gestion como un herdr plus y bastante scoped".
+- S3 (T1-T2): Name/contract: repository `herdr-suite`, binary/command `hs`. User: "no es mejor usar hs en vez de hsd? ... lo que hacemos es su reemplaso al final" — it replaces `dotfiles tools/herdr-sessionizer` (fish script, fzf switcher, must run outside herdr, `exec`s `herdr --session <name>`). Old script is deprecated, not deleted from dotfiles in this feature.
+- S4 (T3-T5): Core feature — User: "poder guardar un space y regenerarlo, por ejemplo tengo un space con 3 paneles y con su distribucion quiero poder grabarlo y restaurarlo luego" — capture the workspace topology (tabs, split tree with directions and ratios, pane labels, cwd, running command or agent) to named files, and recreate it faithfully later.
+- S5 (T3-T5): Layout storage as declared in proposal, accepted with "me parece genial": per-project layouts (`.herdr/layouts.toml`) plus a global directory, `session fork` snapshotting a live session as a template, and plugin actions `snapshot`/`restore`/`fork`/list from inside herdr.
+- S6 (T7): Distribution — User confirmed herdr-bar pattern: release CI publishes multi-platform binaries (linux/macOS, amd64/arm64) with SHA256SUMS; plugin build step downloads the release binary and falls back to Go build; nothing compiles at install time for ordinary users.
+- S7 (T1-T7): UI stack: Bubbletea for TUIs (User: "eso me termino de convencer, yo use rattatui, pero si dices que bubbletea es mejor vamos por ello"). Non-interactive subcommands stay scriptable (exit codes, stable stdout) because plugin actions and scripts call them.
+- S8 (T2): Switcher behavior parity with herdr-sessionizer per its README (`dotfiles docs/topics/herdr-sessionizer.md`): attach on enter (create the typed name when nothing matches), alt-enter force-create, ctrl-r restart, ctrl-s stop, ctrl-x delete, esc quit; santize session names (whitespace runs to one `-`, reject outside `A-Z a-z 0-9 . _ -`); default session not deletable; confirmations for destructive actions; OSC 2 window title on attach.
+
+## Tasks
+
+| ID | S# | Route | Commit | Task |
+| --- | --- | --- | --- | --- |
+| T1 | S1,S2,S6,S7 | worker | feat(repo) | Scaffold: go.mod, cmd/hsd, internal/{layout,session}, herdr-plugin.toml declaring popes/actions, README, offline-test harness. |
+| T2 | S3,S8 | worker | feat(hs) | Session switcher in Go: list sessions (name, running state, workspace preview via per-session socket), attach (exec replace), create/stop/restart/delete with confirmations. |
+| T3 | S4 | worker | feat(space-save) | `hs space save <name>`: snapshot active workspace topology through the herdr socket (tab/pane tree, split direction+ratio, labels, cwd, command/agent per pane, focus). |
+| T4 | S4 | worker | feat(space-load) | `hs space load <name>`: recreate the split tree leaf-first, spawn pane commands/agents, restore focus; verify against a stubbed herdr. |
+| T5 | S5 | worker | feat(layouts) | Layout discovery (project `.herdr/` + global), `session fork`, plugin actions wiring in herdr-plugin.toml. |
+| T6 | S2 | parent | docs | Catalog entry in planned herdr-utils (when that repo exists) and dotfiles-side: deprecate herdr-sessionizer alias. |
+| T7 | S6 | parent | ci | Release workflow: goreleaser or equivalent matrix + SHA256SUMS; plugin install scripts download verified binary. |
+
+## Log
+
+- L1 (2026-11-11): "We need to install ... https://github.com/speardragon/herdr-plugin-manager ... base of all our dotenvs. Also I want to create a repo like herdr-utils or herdr-esentials ... so first thing is the plugin manager can be installed and handle by that new herdr plugin? or is better to install directly here?" — plugin-manager installed directly (bootstrap); naming/architecture discussion started.
+- L2 (2026-11-11): "1) Cual te parece mejor? 2) Pienso dividirlo en un plugin unico para cada funcionalidad grande y un plugin contenedor ... 3) ... si deberia tener una referencia de recomendacion a el plugin-manager?" — decided: herdr-utils container, feature toggles, catalog reference.
+- L3 (2026-11-11): "hay algunos que van a ser netamente de herdr ... una opcion de herdr-gentle" — herdr-gentle reserved; starts inside container, splits when grown.
+- L4 (2026-11-11): plugins added to catalog: herdr-plugin-manager (prefix+p), herdr-bar (prefix+k). Language debate closed: "creo que go tambien es la mejor opcion ... por lo que mencionaste de mejor ecosistema TUI del mundo (Bubbletea)".
+- L5 (2026-11-11): "Nosotros tenemos hs que hace sesiones de herder, creo que quiza podemos agregarlo al utils y lo otro es poder guardar un space y regenerarlo ... quiero que sea modular primero. Una herramientas que gestione sesiones como el hs, que pueda guardar distribucion y restaurarla, etc y que todas esas funcionalidades sean un solo paquete" — accepted scoped proposal: herdr-suite repo, hs command, phase-1 MVP list.
+- L6 (2026-11-11): language decision: "esta fase no es un mvp, es algo que va a quedar fijo y una utilidad que debe ser segura y escalable ... go tambien es la mejor opcion ... bubbletea ... vamos por ello".
+- L7 (2026-11-11): names decided: repo `herdr-suite`; command `hs` replacing herdr-sessionizer ("no es mejor usar hs en vez de hsd? ... su reemplaso al final").

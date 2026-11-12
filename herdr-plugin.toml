@@ -1,0 +1,11 @@
+id = "herdr-suite"
+name = "Herdr Suite"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "Session and space management for herdr: switch named sessions, then snapshot and restore workspace layouts"
+platforms = ["linux", "macos"]
+
+startup = []
+actions = []
+panes = []
+events = []
