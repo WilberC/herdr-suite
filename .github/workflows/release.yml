@@ -1,0 +1,87 @@
+# Publishes what a herdr install consumes: one static binary per target plus a
+# SHA256SUMS file that names each of them. Nothing here needs a release tool:
+# the Go toolchain, sha256sum and the gh CLI shipped on the runner are enough.
+#
+# Assets are named hs-<os>-<arch>, where <os> and <arch> are the Go GOOS and
+# GOARCH values the matrix builds. cmd/hs/release_workflow_test.go asserts this
+# matrix and the platforms in herdr-plugin.toml agree, so a target added here
+# without a matching platform fails the test suite.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -count=1 ./...
+      - name: Gofmt check
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [[ -n "$unformatted" ]]; then
+            echo "these files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, darwin]
+        arch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build hs-${GOOS}-${GOARCH}
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -trimpath -o "dist/hs-${GOOS}-${GOARCH}" ./cmd/hs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hs-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/hs-${{ matrix.os }}-${{ matrix.arch }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        run: |
+          cd dist
+          sha256sum hs-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/hs-* dist/SHA256SUMS \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

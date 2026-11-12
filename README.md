@@ -3,6 +3,11 @@
 Session and space management for [herdr](https://herdr.dev): switch named
 sessions, and snapshot a workspace layout so it can be recreated later.
 
+<!-- Badges go live with the first v* tag; uncomment them then.
+[![CI](https://github.com/WilberC/herdr-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/WilberC/herdr-suite/actions/workflows/ci.yml)
+[![release](https://github.com/WilberC/herdr-suite/actions/workflows/release.yml/badge.svg)](https://github.com/WilberC/herdr-suite/actions/workflows/release.yml)
+-->
+
 The same Go binary serves both surfaces: a non-interactive CLI for scripts and
 herdr plugin actions that run inside herdr. Destructive operations require
 confirmation, and non-interactive commands keep stable exit codes and stdout.
@@ -21,30 +26,44 @@ session forks and the plugin actions are implemented.
 - `hs space list` lists the layouts visible from the current directory.
 - `herdr-plugin.toml` declares the `save`, `load` and `list` actions and the two
   panes they open.
-- `hs layout` still reports `not implemented` and exits `2`; `hs space list` is
-  the listing command.
 - `internal/herdrmock` is the offline fake of the herdr surface used by tests.
+- `.github/workflows/release.yml` publishes the release binaries and their
+  checksums on a `v*` tag, and `.github/workflows/ci.yml` gates every push.
 
-The published plugin is still the next task: release binaries are not built yet,
-so `herdr-plugin.toml` names a `bin/hs` that only a release or a local build
-produces. See [Inside herdr](#inside-herdr).
+No release is tagged yet, and herdr runs no build step for this manifest, so
+`herdr-plugin.toml` names a `bin/hs` that only a release download or a local
+build puts there. See [Install](#install) and [Inside herdr](#inside-herdr).
 
 ## Install
 
-Not published yet. The plugin requires herdr 0.7.5 or newer — `herdr api
-snapshot`, which every space command reads through, first shipped in 0.7.2 — and
-will be installed like other herdr plugins:
+The plugin requires herdr 0.7.5 or newer (`herdr api snapshot`, which every
+space command reads through, first shipped in 0.7.2) and installs like any other
+herdr plugin:
 
 ```bash
 herdr plugin install WilberC/herdr-suite
 ```
 
-Distribution follows the herdr-bar pattern: release CI publishes `linux` and
-`macOS` binaries for `amd64` and `arm64` with a `SHA256SUMS` file, and the
-plugin build step downloads the verified binary into the plugin's own `bin/`
-directory, falling back to a local Go build when no release artifact matches.
-Neither the workflow nor the build step exists yet, so a fresh clone has no
-binary for the manifest's actions. `make hs` builds it into `bin/hs` meanwhile.
+Each `v*` tag publishes four static binaries — `hs-linux-amd64`,
+`hs-linux-arm64`, `hs-darwin-amd64` and `hs-darwin-arm64` — next to a
+`SHA256SUMS` file on [the releases
+page](https://github.com/WilberC/herdr-suite/releases). `herdr plugin install`
+leaves a checkout whose path `herdr plugin list --plugin herdr-suite --json`
+reports as `plugin_root`; run this inside it, picking the asset for this machine:
+
+```bash
+ASSET=hs-linux-amd64   # or hs-darwin-arm64, hs-darwin-amd64, hs-linux-arm64
+curl -fsSLO "https://github.com/WilberC/herdr-suite/releases/latest/download/$ASSET"
+curl -fsSLO https://github.com/WilberC/herdr-suite/releases/latest/download/SHA256SUMS
+grep -F "$ASSET" SHA256SUMS | sha256sum -c -   # macOS: | shasum -a 256 -c -
+mkdir -p bin && install -m 755 "$ASSET" bin/hs
+```
+
+`SHA256SUMS` covers every asset, so the check reads only the line of the binary
+this machine downloaded. Nothing compiles and nothing is downloaded
+automatically yet: herdr's install runs no build step for this manifest, so the
+`bin/hs` the plugin actions run is the one placed above, or `make hs` in a
+working tree — see [Inside herdr](#inside-herdr).
 
 ## Usage
 
@@ -296,9 +315,10 @@ command = "herdr-suite.list"
 Action output lands in `herdr plugin log herdr-suite`.
 
 Two gaps are documented rather than worked around. `bin/hs` is a release
-artifact: the release workflow is the next task, and `herdr plugin link` does not
-run build commands, so link a working tree only after `make hs`. And inside
-herdr, runtime commands run with the plugin directory as their working
+artifact and `bin/` is gitignored, so a checkout carries no binary, and herdr
+runs no build on `herdr plugin link` or on install: `make hs` builds `bin/hs`
+in a working tree, and every action and pane above expects exactly that path.
+And inside herdr, runtime commands run with the plugin directory as their working
 directory, so project discovery there needs `--dir <path>`; herdr reports no
 project directory to a plugin command, so guessing one would be wrong.
 
@@ -370,6 +390,32 @@ make vet     # go vet ./...
 make fmt     # gofmt -w .
 ```
 
+`.github/workflows/ci.yml` runs the same checks on `ubuntu-latest` and
+`macos-latest` for every push and pull request: build, `go vet`, a `gofmt -l cmd
+internal` that fails the job on any unformatted file, and `go test -count=1
+./...`. Locally:
+
+```bash
+go build ./... && go vet ./... && test -z "$(gofmt -l cmd internal)" && go test -count=1 ./...
+```
+
+`.github/workflows/release.yml` repeats the checks once more on a `v*` tag, then
+cross-compiles the four targets with `CGO_ENABLED=0`, writes `SHA256SUMS` with
+`sha256sum`, and creates the GitHub release with `gh`. Both workflows read the
+toolchain from `go-version-file: go.mod`, so the version lives in one place, and
+neither needs a release tool: the pipeline is `go`, `sha256sum` and `gh` only.
+
+The matrix stops at linux and darwin, the two platforms `herdr-plugin.toml`
+declares. A Windows binary is deliberately not shipped: `syscall.Exec` returns
+`EWINDOWS` on Windows, so `hs attach` and the switcher could not replace the
+process there, and the code does compile for `windows/amd64`. WSL runs the linux
+asset, so a windows target would only add an asset nothing should run.
+
+Cutting a release is `git tag v0.1.0 && git push origin v0.1.0`, and the tag is
+the owner's decision, like a merge or a push. `cmd/hs/release_workflow_test.go`
+reads both workflows: it fails when the release matrix and the platforms in
+`herdr-plugin.toml` disagree, so a target cannot ship from one without the other.
+
 Tests never talk to a real herdr socket or binary. `internal/herdrmock`
 provides a fake `herdrmock.Client` that records calls and returns scripted
 state and errors, and the `internal/herdrcli` tests point `HERDR_BIN_PATH` at a
@@ -387,4 +433,5 @@ such interpreter is installed.
 | `internal/herdrmock/` | the herdr client interface and the offline fake |
 | `internal/layout/` | the layout schema, its storage directory, the snapshot report and the replay plan |
 | `herdr-plugin.toml` | the herdr plugin manifest |
+| `.github/workflows/` | `ci.yml`, the checks every push runs, and `release.yml`, the tagged release |
 | `odd/tasks/herdr-suite.md` | the working spec and task log |

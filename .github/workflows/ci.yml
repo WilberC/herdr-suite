@@ -1,0 +1,40 @@
+# Every push and pull request: build, vet, format and the offline test suite, on
+# both platforms the plugin declares. The suite never reaches a herdr socket or
+# binary, so it runs unchanged here and on a laptop.
+#
+# release.yml owns tagged builds; nothing in this file publishes anything.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Gofmt check
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [[ -n "$unformatted" ]]; then
+            echo "these files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Test
+        run: go test -count=1 ./...

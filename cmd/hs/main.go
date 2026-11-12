@@ -21,7 +21,6 @@ Commands:
   attach <name>   Attach to a session; run it outside herdr
   session         Manage herdr sessions
   space           Save and restore herdr spaces
-  layout          Inspect stored layouts
 
 Run "hs" with no command for the interactive session switcher.
 Run "hs <command> --help" for command details.
@@ -69,14 +68,6 @@ var commands = []command{
 		name:    "space",
 		summary: "Save and restore herdr spaces",
 		usage:   spaceUsage,
-	},
-	{
-		name:    "layout",
-		summary: "Inspect stored layouts",
-		usage: `usage: hs layout [command]
-
-List and inspect stored layouts.
-`,
 	},
 }
 
@@ -189,8 +180,7 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 
 	cmd, ok := lookup(args[0])
 	if !ok {
-		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
-		return 2
+		return unknownCommand(args[0], stderr)
 	}
 	if hasHelp(args[1:]) {
 		fmt.Fprint(stdout, helpFor(cmd, args[1:]))
@@ -206,7 +196,13 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 		return runSpace(d, args[1:])
 	}
 
-	fmt.Fprintf(stderr, "%s: not implemented\n\n%s", cmd.name, cmd.usage)
+	return unknownCommand(cmd.name, stderr)
+}
+
+// unknownCommand is what any name the table does not dispatch answers: the exit
+// status scripts rely on, with the usage they can read.
+func unknownCommand(name string, stderr io.Writer) int {
+	fmt.Fprintf(stderr, "unknown command %q\n\n%s", name, usage)
 	return 2
 }
 

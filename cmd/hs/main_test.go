@@ -105,7 +105,7 @@ func TestRunContract(t *testing.T) {
 			name:       "help prints usage on stdout and exits 0",
 			args:       []string{"--help"},
 			wantExit:   0,
-			wantStdout: []string{"usage: hs", "attach", "session", "space", "layout"},
+			wantStdout: []string{"usage: hs", "attach", "session", "space"},
 		},
 		{
 			name:       "the help command prints usage on stdout",
@@ -126,10 +126,16 @@ func TestRunContract(t *testing.T) {
 			wantStderr: []string{"usage: hs space", "save <name>"},
 		},
 		{
-			name:       "the layout command still reports not implemented",
+			name:       "the removed layout command is an unknown command",
 			args:       []string{"layout"},
 			wantExit:   2,
-			wantStderr: []string{"layout: not implemented", "usage: hs layout"},
+			wantStderr: []string{`unknown command "layout"`, "usage: hs"},
+		},
+		{
+			name:       "the removed layout command does not answer help",
+			args:       []string{"layout", "--help"},
+			wantExit:   2,
+			wantStderr: []string{`unknown command "layout"`, "usage: hs"},
 		},
 		{
 			name:       "session help prints its usage on stdout",
@@ -353,5 +359,25 @@ func TestRunContract(t *testing.T) {
 				t.Errorf("switcher runs = %d, wantSwitcher %v", switcherRuns, tt.wantSwitcher)
 			}
 		})
+	}
+}
+
+// TestRemovedLayoutScaffoldIsGone pins cleanup A: the scaffold group only ever
+// exited 2 as not implemented, and hs space list has replaced it, so neither the
+// command table nor the usage text may name it. An "hs layout" now reaches the
+// unknown-command path TestRunContract covers.
+func TestRemovedLayoutScaffoldIsGone(t *testing.T) {
+	if _, ok := lookup("layout"); ok {
+		t.Fatalf("lookup(%q) = ok, want the removed scaffold group to be unknown", "layout")
+	}
+	if strings.Contains(usage, "layout") {
+		t.Fatalf("usage still advertises the removed layout command:\n%s", usage)
+	}
+	for _, cmd := range commands {
+		switch cmd.name {
+		case "attach", "session", "space":
+		default:
+			t.Fatalf("the command table holds %q, want only implemented commands", cmd.name)
+		}
 	}
 }
