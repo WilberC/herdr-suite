@@ -31,6 +31,7 @@ func newTestDeps() (deps, *herdrmock.Fake, *fakeExecer) {
 	return deps{
 		client: client,
 		spaces: client,
+		writer: client,
 		exec:   exec,
 		getenv: func(string) string { return "" },
 		switcher: func(context.Context) (string, error) {

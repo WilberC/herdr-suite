@@ -10,14 +10,15 @@ confirmation, and non-interactive commands keep stable exit codes and stdout.
 ## Status
 
 `hs` replaces `herdr-sessionizer`: the interactive switcher, the session
-lifecycle commands and space snapshots are implemented.
+lifecycle commands, and saving and restoring spaces are implemented.
 
 - `hs` and `hs session ...` manage sessions.
 - `hs space save` snapshots the active workspace as a stored layout.
-- `hs space load` and `hs layout` still report `not implemented` and exit `2`.
+- `hs space load` recreates a stored layout in a workspace.
+- `hs layout` still reports `not implemented` and exits `2`.
 - `internal/herdrmock` is the offline fake of the herdr surface used by tests.
 
-Layout restore, `session fork` and the plugin actions follow.
+Layout discovery, `session fork` and the plugin actions follow.
 
 ## Install
 
@@ -48,6 +49,11 @@ hs space save work              # snapshot the active workspace as "work"
 hs space save work --force      # replace a stored layout of the same name
 hs space save work --session api  # snapshot another session's active workspace
 hs space save work --json       # print the snapshot document instead of the report
+hs space load work              # recreate "work" in the active workspace
+hs space load work --dry-run    # print the replay plan and change nothing
+hs space load work --replace    # close the workspace's other panes and tabs first
+hs space load work --new-workspace  # build it in a new workspace
+hs space load work --session api    # replay into another session
 ```
 
 Session names are sanitized before they reach herdr: whitespace runs become
@@ -84,8 +90,76 @@ tab 1 '1' · 1 pane · focus w35:p7
 pane w35:p7 · pi working · /home/wilber/dotfiles
 ```
 
-`--json` prints the snapshot document instead, so scripts and the future load
-command share one machine-readable shape.
+`--json` prints the snapshot document instead, so scripts and the load command
+share one machine-readable shape.
+
+### Restoring a space
+
+`hs space load <name>` reads the stored layout and recreates it in the session
+`hs` runs against, or in the one `--session` names. The split tree replays from
+its root, parents before children: herdr makes a split by dividing one pane, so
+each replayed split consumes the pane that owns the area it divides and creates
+the pane of its second child, before the splits inside that child follow. Each
+stored leaf gets exactly one pane, in its stored cwd, with its stored label and,
+when one was recorded, its agent started through `herdr agent start`.
+
+herdr reports no command for a plain shell pane, so no command is restored:
+those panes open a shell in their stored cwd and nothing else. Agent names must
+be lowercase, start with a letter and stay unique among live agents, so a stored
+name is folded into that shape, a leaf without one falls back to its agent kind,
+and a collision gains a numeric suffix.
+
+The destination workspace decides what the replay starts from. A workspace
+holding a single idle pane is the empty case: that pane becomes the first pane of
+the layout. Anything else is refused, because the replay would lay its tree over
+existing work:
+
+```text
+hs: workspace 'dotfiles' already has 3 panes; pass --replace to close them before loading
+```
+
+`--replace` closes the workspace's other panes and tabs first, and says on stderr
+what it is about to close, naming the ids it read:
+
+```text
+replacing workspace 'dotfiles': closing 2 panes (w1:p2, w1:p3) and 1 tab (w1:t2)
+```
+
+The pane `hs` itself runs in is never closed. `--new-workspace` builds the layout
+in a new workspace named after the stored one instead of touching this one, and
+`--new-workspace` is the only way a load creates a workspace.
+
+When the stored workspace is not the active one and the session has several, the
+load asks which workspace to use. It refuses to guess without a terminal, so
+scripts either run it where the stored workspace is active or pass
+`--new-workspace`.
+
+`--dry-run` prints the replay plan and changes nothing: the ordered list of
+closes, creations, splits, renames, agent starts and focus steps, with the stored
+pane ids, the directions and the ratios the replay would use.
+
+```text
+plan for layout 'dotfiles' into workspace 'dotfiles' · 1 tab · 1 pane
+1. split right 0.60 in w35:p7 · new pane w35:p8 · cwd /home/wilber/dotfiles
+2. start agent pi in w35:p8 as pi
+3. focus tab 1 '1'
+4. focus agent pi
+```
+
+herdr has no transaction. A replay that fails halfway keeps the steps it already
+made, so the failure names the step and says the workspace may hold a partial
+layout:
+
+```text
+hs: step 3 of 5 failed: create tab 2 'side' · cwd /tmp: herdr tab create: exit status 1: pane limit reached
+hs: herdr has no transaction, so the workspace may hold a partial layout. Remove the panes or tabs it created and load again.
+```
+
+Focus is restored last: the destination workspace when it was not the active one,
+then the stored focused tab, then the agent of the stored focused pane when it has
+one. herdr's CLI cannot focus a pane by id, so the replayed pane receives focus by
+being the only one created with `--focus`; a stored focused pane that no split
+creates keeps its tab's focus.
 
 ### Layout storage
 
@@ -165,8 +239,8 @@ stub script, so the suite is deterministic and runs offline.
 | --- | --- |
 | `cmd/hs/` | the `hs` entry point and its subcommand table |
 | `internal/session/` | session lifecycle, the switcher, and the table/JSON output |
-| `internal/herdrcli/` | the herdr client: the CLI calls, the topology snapshot and the process replacement |
+| `internal/herdrcli/` | the herdr client: the CLI calls, the topology snapshot, the layout mutations and the process replacement |
 | `internal/herdrmock/` | the herdr client interface and the offline fake |
-| `internal/layout/` | the layout schema, its storage directory and the snapshot report |
+| `internal/layout/` | the layout schema, its storage directory, the snapshot report and the replay plan |
 | `herdr-plugin.toml` | the herdr plugin manifest |
 | `odd/tasks/herdr-suite.md` | the working spec and task log |

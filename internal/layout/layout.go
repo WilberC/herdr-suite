@@ -101,7 +101,7 @@ func captureNode(tab herdrmock.Tab, node herdrmock.LayoutNode) (Node, error) {
 			Label:  pane.Label,
 			Cwd:    pane.Cwd,
 		}
-		if pane.Agent != "" || pane.AgentName != "" || pane.AgentState != "" {
+		if pane.Agent != "" {
 			captured.Agent = &Agent{Kind: pane.Agent, Name: pane.AgentName, State: pane.AgentState}
 		}
 		return captured, nil

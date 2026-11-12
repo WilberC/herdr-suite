@@ -1,0 +1,174 @@
+package layout
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/WilberC/herdr-suite/internal/herdrmock"
+)
+
+// StepError reports the replay step that failed. herdr keeps no transaction, so
+// the steps before this one stay applied and the report names the step that
+// stopped the replay.
+type StepError struct {
+	Index  int
+	Total  int
+	Action Action
+	Err    error
+}
+
+func (e StepError) Error() string {
+	return fmt.Sprintf("step %d of %d failed: %s: %v", e.Index, e.Total, e.Action.describe(), e.Err)
+}
+
+// Unwrap returns the herdr failure the step reported.
+func (e StepError) Unwrap() error { return e.Err }
+
+// Apply replays replay against mut, one herdr call per step, and stops at the
+// first failure. The caller reports the StepError: a replay that stopped
+// halfway left a partial layout behind, and herdr cannot roll it back.
+func Apply(ctx context.Context, mut herdrmock.Mutator, replay Replay) error {
+	state := &liveReplay{
+		workspace: replay.Base.WorkspaceID,
+		tabs:      make(map[int]string, replay.Tabs),
+		panes:     make(map[string]string, replay.Panes),
+	}
+	if replay.Base.TabID != "" && replay.Base.Leaf != "" {
+		state.tabs[1] = replay.Base.TabID
+		state.panes[replay.Base.Leaf] = replay.Base.PaneID
+	}
+
+	for index, action := range replay.Actions {
+		if err := applyAction(ctx, mut, state, action); err != nil {
+			return StepError{Index: index + 1, Total: len(replay.Actions), Action: action, Err: err}
+		}
+	}
+	return nil
+}
+
+// liveReplay maps the stored handles a replay plans with to the live ids herdr
+// answered with.
+type liveReplay struct {
+	workspace string
+	tabs      map[int]string
+	panes     map[string]string
+}
+
+func applyAction(ctx context.Context, mut herdrmock.Mutator, state *liveReplay, action Action) error {
+	switch action.Op {
+	case OpCreateWorkspace:
+		created, err := mut.CreateWorkspace(ctx, herdrmock.CreateWorkspaceRequest{
+			Cwd:   action.Cwd,
+			Label: action.Label,
+			Focus: action.Focus,
+		})
+		if err != nil {
+			return err
+		}
+		state.workspace = created.WorkspaceID
+		state.tabs[action.Tab] = created.TabID
+		state.panes[action.Pane] = created.PaneID
+		return nil
+
+	case OpCreateTab:
+		created, err := mut.CreateTab(ctx, herdrmock.CreateTabRequest{
+			WorkspaceID: state.workspace,
+			Cwd:         action.Cwd,
+			Label:       action.TabLabel,
+			Focus:       action.Focus,
+		})
+		if err != nil {
+			return err
+		}
+		state.tabs[action.Tab] = created.TabID
+		state.panes[action.Pane] = created.PaneID
+		return nil
+
+	case OpSplit:
+		from, err := state.pane(action.From)
+		if err != nil {
+			return err
+		}
+		created, err := mut.SplitPane(ctx, herdrmock.SplitRequest{
+			PaneID:    from,
+			Direction: action.Direction,
+			Ratio:     action.Ratio,
+			Cwd:       action.Cwd,
+			Focus:     action.Focus,
+		})
+		if err != nil {
+			return err
+		}
+		state.panes[action.Pane] = created
+		return nil
+
+	case OpRenamePane:
+		pane, err := state.pane(action.Pane)
+		if err != nil {
+			return err
+		}
+		return mut.RenamePane(ctx, pane, action.Label)
+
+	case OpRenameTab:
+		tab, err := state.tab(action.Tab)
+		if err != nil {
+			return err
+		}
+		return mut.RenameTab(ctx, tab, action.Label)
+
+	case OpStartAgent:
+		pane, err := state.pane(action.Pane)
+		if err != nil {
+			return err
+		}
+		return mut.StartAgent(ctx, herdrmock.StartAgentRequest{
+			Name:   action.AgentName,
+			Kind:   action.AgentKind,
+			PaneID: pane,
+		})
+
+	case OpClosePane:
+		return mut.ClosePane(ctx, action.PaneID)
+
+	case OpCloseTab:
+		return mut.CloseTab(ctx, action.TabID)
+
+	case OpFocusWorkspace:
+		workspace := action.WorkspaceID
+		if workspace == "" {
+			workspace = state.workspace
+		}
+		if workspace == "" {
+			return errors.New("no workspace to focus")
+		}
+		return mut.FocusWorkspace(ctx, workspace)
+
+	case OpFocusTab:
+		tab, err := state.tab(action.Tab)
+		if err != nil {
+			return err
+		}
+		return mut.FocusTab(ctx, tab)
+
+	case OpFocusAgent:
+		return mut.FocusAgent(ctx, action.AgentName)
+	}
+	return fmt.Errorf("unknown replay step '%s'", action.Op)
+}
+
+func (s *liveReplay) pane(handle string) (string, error) {
+	pane, ok := s.panes[handle]
+	if !ok || pane == "" {
+		return "", fmt.Errorf("pane '%s' is not part of the replay", handle)
+	}
+	return pane, nil
+}
+
+func (s *liveReplay) tab(index int) (string, error) {
+	tab, ok := s.tabs[index]
+	if !ok || tab == "" {
+		return "", fmt.Errorf("tab %d is not part of the replay", index)
+	}
+	return tab, nil
+}

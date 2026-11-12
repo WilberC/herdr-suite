@@ -198,3 +198,18 @@ func TestUnmarshalRejectsAnInvalidDocument(t *testing.T) {
 		t.Fatalf("Unmarshal error = nil, want a parse failure")
 	}
 }
+
+func TestCaptureRecordsNoAgentForAPaneThatOnlyReportsAStatus(t *testing.T) {
+	space := spaceFixture()
+	plain := &space.Workspaces[0].Tabs[1].Panes[0]
+	plain.Agent, plain.AgentState = "", "idle"
+
+	got, err := Capture("work", space, space.Workspaces[0])
+	if err != nil {
+		t.Fatalf("Capture error = %v, want nil", err)
+	}
+
+	if agent := got.Workspace.Tabs[1].Root.Agent; agent != nil {
+		t.Fatalf("captured agent = %#v, want none for a plain pane that reports a status", agent)
+	}
+}

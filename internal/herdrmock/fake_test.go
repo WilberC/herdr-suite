@@ -73,7 +73,6 @@ func TestClientContract(t *testing.T) {
 		Direction: "down",
 		Ratio:     0.5,
 		Cwd:       "/home/me/project",
-		Label:     "logs",
 	}
 	agentRequest := herdrmock.StartAgentRequest{
 		Name:   "reviewer",
@@ -187,7 +186,7 @@ func TestClientContract(t *testing.T) {
 			name: "split pane returns the next pane id",
 			fake: fixture,
 			call: func(ctx context.Context, client herdrmock.Client) (any, error) {
-				return client.SplitPane(ctx, splitRequest)
+				return client.Mutations(herdrmock.Target{}).SplitPane(ctx, splitRequest)
 			},
 			want:      "p-9",
 			wantCalls: []herdrmock.Call{{Method: "SplitPane", Target: "p-1"}},
@@ -200,7 +199,7 @@ func TestClientContract(t *testing.T) {
 				return f
 			},
 			call: func(ctx context.Context, client herdrmock.Client) (any, error) {
-				return client.SplitPane(ctx, splitRequest)
+				return client.Mutations(herdrmock.Target{}).SplitPane(ctx, splitRequest)
 			},
 			wantErr:   errors.New("pane is gone"),
 			wantCalls: []herdrmock.Call{{Method: "SplitPane", Target: "p-1"}},
@@ -209,7 +208,7 @@ func TestClientContract(t *testing.T) {
 			name: "start agent records the request",
 			fake: fixture,
 			call: func(ctx context.Context, client herdrmock.Client) (any, error) {
-				return nil, client.StartAgent(ctx, agentRequest)
+				return nil, client.Mutations(herdrmock.Target{}).StartAgent(ctx, agentRequest)
 			},
 			wantCalls: []herdrmock.Call{{Method: "StartAgent", Target: "p-1"}},
 		},

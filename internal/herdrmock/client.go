@@ -74,13 +74,15 @@ type Target struct {
 	Socket string
 }
 
-// SplitRequest describes "herdr pane split" arguments.
+// SplitRequest describes "herdr pane split" arguments. herdr keeps the split
+// pane and places the new one beside it, so Ratio is the share the split pane
+// keeps and the new pane takes the rest.
 type SplitRequest struct {
 	PaneID    string
 	Direction string
 	Ratio     float64
 	Cwd       string
-	Label     string
+	Focus     bool
 }
 
 // StartAgentRequest describes "herdr agent start" arguments.
@@ -91,10 +93,56 @@ type StartAgentRequest struct {
 	Args   []string
 }
 
+// CreateWorkspaceRequest describes "herdr workspace create" arguments.
+type CreateWorkspaceRequest struct {
+	Cwd   string
+	Label string
+	Focus bool
+}
+
+// CreatedPane is the workspace, tab and root pane a creation call returned.
+type CreatedPane struct {
+	WorkspaceID string
+	TabID       string
+	PaneID      string
+}
+
+// CreateTabRequest describes "herdr tab create" arguments.
+type CreateTabRequest struct {
+	WorkspaceID string
+	Cwd         string
+	Label       string
+	Focus       bool
+}
+
+// CreatedTab is the tab and its root pane a creation call returned.
+type CreatedTab struct {
+	TabID  string
+	PaneID string
+}
+
 // Call records one invoked Client method and the identifier it targeted.
 type Call struct {
 	Method string
 	Target string
+}
+
+// Op records one client request in full, so a test can assert the exact call
+// sequence a replay performs and rebuild the topology it composed.
+type Op struct {
+	Method      string
+	Target      Target
+	PaneID      string
+	Created     string
+	TabID       string
+	WorkspaceID string
+	Direction   string
+	Ratio       float64
+	Cwd         string
+	Label       string
+	AgentKind   string
+	AgentName   string
+	Focus       bool
 }
 
 // SessionClient is the part of Client that session management needs: it lists
@@ -112,12 +160,33 @@ type SpaceClient interface {
 	Snapshot(ctx context.Context, target Target) (Space, error)
 }
 
+// Writer binds one herdr session's write surface: a layout replay performs
+// every mutation through the Mutator it returns.
+type Writer interface {
+	Mutations(target Target) Mutator
+}
+
 // Client is the minimal herdr surface herdr-suite depends on.
 type Client interface {
 	SessionClient
 	SpaceClient
+	Writer
 	Workspace(ctx context.Context, workspaceID string) (Workspace, error)
 	Pane(ctx context.Context, paneID string) (Pane, error)
+}
+
+// Mutator is the write surface of one herdr session: every call mutates the
+// layout of the session target selects.
+type Mutator interface {
+	CreateWorkspace(ctx context.Context, req CreateWorkspaceRequest) (CreatedPane, error)
+	CreateTab(ctx context.Context, req CreateTabRequest) (CreatedTab, error)
 	SplitPane(ctx context.Context, req SplitRequest) (string, error)
+	RenameTab(ctx context.Context, tabID, label string) error
+	RenamePane(ctx context.Context, paneID, label string) error
+	FocusWorkspace(ctx context.Context, workspaceID string) error
+	FocusTab(ctx context.Context, tabID string) error
+	FocusAgent(ctx context.Context, target string) error
 	StartAgent(ctx context.Context, req StartAgentRequest) error
+	ClosePane(ctx context.Context, paneID string) error
+	CloseTab(ctx context.Context, tabID string) error
 }

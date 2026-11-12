@@ -92,6 +92,7 @@ func newSpaceRun(t *testing.T, sessions ...herdrmock.Session) *spaceRun {
 	run.d = deps{
 		client: client,
 		spaces: client,
+		writer: client,
 		exec:   &fakeExecer{},
 		getenv: func(name string) string {
 			if name == "XDG_CONFIG_HOME" {

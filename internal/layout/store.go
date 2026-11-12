@@ -73,6 +73,39 @@ func Save(dir string, document Layout, force bool) (string, error) {
 	return path, nil
 }
 
+// NotFoundError reports a layout that is not stored.
+type NotFoundError struct {
+	Path string
+}
+
+func (e NotFoundError) Error() string {
+	return fmt.Sprintf("no stored layout at %s", e.Path)
+}
+
+// Load reads the layout named name from dir and returns it with the path it was
+// read from. A name that is not stored reports NotFoundError.
+func Load(dir, name string) (Layout, string, error) {
+	if err := validateName(name); err != nil {
+		return Layout{}, "", err
+	}
+	path := filepath.Join(dir, FileName(name))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return Layout{}, path, NotFoundError{Path: path}
+		}
+		return Layout{}, path, fmt.Errorf("read layout: %w", err)
+	}
+	document, err := Unmarshal(data)
+	if err != nil {
+		return Layout{}, path, fmt.Errorf("%s: %w", path, err)
+	}
+	if document.Name != name {
+		return Layout{}, path, fmt.Errorf("%s holds layout '%s', want '%s'", path, document.Name, name)
+	}
+	return document, path, nil
+}
+
 // validateName keeps a layout name inside its directory. Names reach this
 // package already sanitized, so this is the last guard, not a user-facing rule.
 func validateName(name string) error {

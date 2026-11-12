@@ -14,8 +14,9 @@ const spaceUsage = `usage: hs space <command>
 
 Commands:
   save <name>             Snapshot the active workspace as a layout
+  load <name>             Recreate a stored layout in a workspace
 
-Run "hs space save --help" for the save options.
+Run "hs space save --help" or "hs space load --help" for their options.
 
 A layout holds the workspace's tabs and each tab's split tree: split
 directions, ratios, pane labels, cwds and agent identifications. Layouts are
@@ -46,6 +47,8 @@ func runSpace(d deps, args []string) int {
 	switch args[0] {
 	case "save":
 		return runSpaceSave(d, args[1:])
+	case "load":
+		return runSpaceLoad(d, args[1:])
 	}
 
 	fmt.Fprintf(d.err, "unknown space command %q\n\n%s", args[0], spaceUsage)
@@ -63,7 +66,7 @@ func runSpaceSave(d deps, args []string) int {
 	}
 
 	ctx := context.Background()
-	target, err := saveTarget(ctx, d, options.session)
+	target, err := sessionTarget(ctx, d, options.session, spaceSaveUsage)
 	if err != nil {
 		return report(err, d.err)
 	}
@@ -136,15 +139,16 @@ func parseSaveArgs(args []string) (saveOptions, error) {
 	return options, nil
 }
 
-// saveTarget resolves which session to snapshot. Without --session the read
-// goes to the ambient session, the one this process already talks to.
-func saveTarget(ctx context.Context, d deps, raw string) (herdrmock.Target, error) {
+// sessionTarget resolves which session a space command reads or writes.
+// Without --session it is the ambient session, the one this process already
+// talks to.
+func sessionTarget(ctx context.Context, d deps, raw, usage string) (herdrmock.Target, error) {
 	if raw == "" {
 		return herdrmock.Target{}, nil
 	}
 	name, err := session.Sanitize(raw)
 	if err != nil {
-		return herdrmock.Target{}, usageError{reason: err.Error(), usage: spaceSaveUsage}
+		return herdrmock.Target{}, usageError{reason: err.Error(), usage: usage}
 	}
 
 	sessions, err := d.manager(false).List(ctx)

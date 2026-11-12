@@ -82,11 +82,13 @@ List and inspect stored layouts.
 type deps struct {
 	client      herdrmock.SessionClient
 	spaces      herdrmock.SpaceClient
+	writer      herdrmock.Writer
 	exec        session.Execer
 	getenv      func(string) string
 	interactive bool
 	confirm     session.Confirmer
 	switcher    func(context.Context) (string, error)
+	pick        func([]herdrmock.Workspace) (string, error)
 	out         io.Writer
 	err         io.Writer
 }
@@ -104,6 +106,7 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 	d := deps{
 		client:      herdr,
 		spaces:      herdr,
+		writer:      herdr,
 		exec:        herdrcli.Execer{},
 		getenv:      os.Getenv,
 		interactive: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
@@ -114,6 +117,11 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 		d.confirm = session.TerminalConfirmer(os.Stdin, stderr)
 	}
 	d.switcher = defaultSwitcher(d, stdout)
+	if d.interactive {
+		d.pick = func(workspaces []herdrmock.Workspace) (string, error) {
+			return pickWorkspace(os.Stdin, stdout, workspaces)
+		}
+	}
 	return d
 }
 

@@ -36,6 +36,14 @@ func Summary(document Layout, path string) string {
 	return report.String()
 }
 
+// ReplaySummary renders the stable report a completed replay prints: the layout
+// it recreated, the workspace it built in, and what the workspace now holds.
+func ReplaySummary(replay Replay) string {
+	return fmt.Sprintf("loaded layout '%s' into workspace '%s' · %s · %s · %s\n",
+		replay.Layout, replay.Workspace,
+		plural(replay.Tabs, "tab"), plural(replay.Panes, "pane"), plural(len(replay.Actions), "step"))
+}
+
 // writeNode renders one tree node and its subtree. branch is the connector the
 // caller already decided on, and prefix carries the indentation of the levels
 // above it.
