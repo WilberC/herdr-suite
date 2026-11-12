@@ -1,11 +1,54 @@
 id = "herdr-suite"
 name = "Herdr Suite"
 version = "0.1.0"
+# `herdr api snapshot` first shipped in herdr 0.7.2 (src/cli/api.rs gained the
+# snapshot subcommand with the session.snapshot socket method). Plugin actions
+# and panes arrived in 0.7.0, so 0.7.5 covers everything this plugin uses.
 min_herdr_version = "0.7.5"
 description = "Session and space management for herdr: switch named sessions, then snapshot and restore workspace layouts"
 platforms = ["linux", "macos"]
 
 startup = []
-actions = []
-panes = []
 events = []
+
+# Every command resolves the hs binary in this plugin's own bin/ directory, the
+# way herdr-bar resolves bin/herdr-bar. The release workflow publishes that
+# binary; until it does, build it with "make hs" (see the README).
+[[actions]]
+id = "save"
+title = "Save space"
+description = "Snapshot the current workspace as a layout named after it"
+contexts = ["workspace", "pane"]
+command = ["bin/hs", "space", "save", "--current"]
+
+[[actions]]
+id = "load"
+title = "Load space"
+description = "Pick a stored layout and rebuild it in a new workspace"
+contexts = ["global"]
+command = ["bash", "-c", "exec \"${HERDR_BIN_PATH:-herdr}\" plugin pane open --plugin herdr-suite --entrypoint load --placement popup --focus"]
+
+[[actions]]
+id = "list"
+title = "List layouts"
+description = "Show the layouts visible from here in a pane"
+contexts = ["global"]
+command = ["bash", "-c", "exec \"${HERDR_BIN_PATH:-herdr}\" plugin pane open --plugin herdr-suite --entrypoint layouts --placement popup --focus"]
+
+[[panes]]
+id = "load"
+title = "Load space"
+description = "Pick a stored layout and rebuild it in a new workspace"
+placement = "popup"
+width = "74%"
+height = "50%"
+command = ["bin/hs", "space", "load", "--select"]
+
+[[panes]]
+id = "layouts"
+title = "Layouts"
+description = "The layouts visible from here, their scope and what they hold"
+placement = "popup"
+width = "84%"
+height = "50%"
+command = ["bin/hs", "space", "list", "--pane"]

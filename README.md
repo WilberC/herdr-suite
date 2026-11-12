@@ -10,20 +10,30 @@ confirmation, and non-interactive commands keep stable exit codes and stdout.
 ## Status
 
 `hs` replaces `herdr-sessionizer`: the interactive switcher, the session
-lifecycle commands, and saving and restoring spaces are implemented.
+lifecycle commands, saving and restoring spaces, project layout discovery,
+session forks and the plugin actions are implemented.
 
-- `hs` and `hs session ...` manage sessions.
+- `hs` and `hs session ...` manage sessions, and `hs session fork` snapshots a
+  whole session as one layout.
 - `hs space save` snapshots the active workspace as a stored layout.
-- `hs space load` recreates a stored layout in a workspace.
-- `hs layout` still reports `not implemented` and exits `2`.
+- `hs space load` recreates a stored layout, in a workspace or as every
+  workspace a fork captured.
+- `hs space list` lists the layouts visible from the current directory.
+- `herdr-plugin.toml` declares the `save`, `load` and `list` actions and the two
+  panes they open.
+- `hs layout` still reports `not implemented` and exits `2`; `hs space list` is
+  the listing command.
 - `internal/herdrmock` is the offline fake of the herdr surface used by tests.
 
-Layout discovery, `session fork` and the plugin actions follow.
+The published plugin is still the next task: release binaries are not built yet,
+so `herdr-plugin.toml` names a `bin/hs` that only a release or a local build
+produces. See [Inside herdr](#inside-herdr).
 
 ## Install
 
-Not published yet. The plugin requires herdr 0.7.5 or newer and will be
-installed like other herdr plugins:
+Not published yet. The plugin requires herdr 0.7.5 or newer — `herdr api
+snapshot`, which every space command reads through, first shipped in 0.7.2 — and
+will be installed like other herdr plugins:
 
 ```bash
 herdr plugin install WilberC/herdr-suite
@@ -31,8 +41,10 @@ herdr plugin install WilberC/herdr-suite
 
 Distribution follows the herdr-bar pattern: release CI publishes `linux` and
 `macOS` binaries for `amd64` and `arm64` with a `SHA256SUMS` file, and the
-plugin build step downloads the verified binary, falling back to a local Go
-build when no release artifact matches.
+plugin build step downloads the verified binary into the plugin's own `bin/`
+directory, falling back to a local Go build when no release artifact matches.
+Neither the workflow nor the build step exists yet, so a fresh clone has no
+binary for the manifest's actions. `make hs` builds it into `bin/hs` meanwhile.
 
 ## Usage
 
@@ -45,8 +57,11 @@ hs session create "my project"  # creates my-project by attaching it
 hs session stop work --yes      # stop work
 hs session restart work --yes   # stop it so the next attach starts fresh
 hs session delete scratch --yes # stop it first, then delete it
+hs session fork                 # snapshot the current session under its name
+hs session fork work backup     # snapshot session work as the layout backup
 hs space save work              # snapshot the active workspace as "work"
 hs space save work --force      # replace a stored layout of the same name
+hs space save --current         # name the layout after the active workspace
 hs space save work --session api  # snapshot another session's active workspace
 hs space save work --json       # print the snapshot document instead of the report
 hs space load work              # recreate "work" in the active workspace
@@ -54,6 +69,12 @@ hs space load work --dry-run    # print the replay plan and change nothing
 hs space load work --replace    # close the workspace's other panes and tabs first
 hs space load work --new-workspace  # build it in a new workspace
 hs space load work --session api    # replay into another session
+hs space load --select          # pick a stored layout in a new workspace
+hs space load ./hand/made.json  # load a layout file by path
+hs space list                   # NAME, SCOPE, WORKSPACE, TABS, PANES, MODIFIED
+hs space list --json            # {"layouts":[{"name","scope","workspace",...}]}
+hs space list --pane            # keep the table on screen until enter
+hs space list --dir ~/project   # discover from that directory instead
 ```
 
 Session names are sanitized before they reach herdr: whitespace runs become
@@ -161,6 +182,126 @@ one. herdr's CLI cannot focus a pane by id, so the replayed pane receives focus 
 being the only one created with `--focus`; a stored focused pane that no split
 creates keeps its tab's focus.
 
+### Project layouts
+
+`hs space list` and `hs space load` look for layouts in two places: the global
+store, and the nearest project that declares its own layouts under `.herdr/`.
+The project is found from the working directory upward, like a git repository
+root, and the nearest declaration wins.
+
+A project declares layouts in either form, or both:
+
+```text
+.herdr/layouts/api.json   # the file name is the layout name
+.herdr/layouts.toml       # an index of names and files
+```
+
+```toml
+# .herdr/layouts.toml
+[layouts]
+api = "api.json"
+web = "layouts/web.json"
+```
+
+The index is a narrow TOML subset on purpose: one `[layouts]` table, one
+`name = "path"` entry per layout with the path relative to `.herdr/`, and `#`
+comments. Anything else is refused with the line number instead of guessed at,
+which is why the package needs no TOML dependency.
+
+Resolution is one rule for the whole CLI, and `internal/layout/doc.go` owns it:
+
+1. an explicit path (`hs space load ./api.json`),
+2. the project declaration, by name,
+3. the global store.
+
+A name the project does not declare falls through to the global store. A name the
+project declares twice — in its `layouts/` directory and again in its index — is
+refused with every candidate listed, because picking one silently would load a
+layout the caller did not name:
+
+```text
+hs: layout 'api' is declared in 2 places: project /repo/.herdr/layouts/api.json, project /repo/.herdr/other/api.json; remove one or load the file by path
+```
+
+`hs space list` prints the scope of every row, so two layouts with the same name
+are visible before a load resolves one:
+
+```text
+NAME  SCOPE    WORKSPACE  TABS  PANES  MODIFIED
+api   project  api        1     1      2026-01-02 03:04
+work  global   project    2     4      2026-01-02 03:04
+```
+
+The workspace column prints the first stored workspace, plus how many further
+workspaces a forked layout holds (`project +1`). The modified time is UTC, so the
+table is stable across time zones.
+
+Saving always writes the global store; a project's `.herdr/` layouts are
+committed by hand.
+
+### Forking a session
+
+`hs session fork [session] [layout-name]` snapshots every workspace of a session
+into one layout, instead of the single active workspace `hs space save` stores.
+Without a session it forks the current one — resolved by matching the socket
+herdr exports against the sessions herdr lists — and the layout name defaults to
+the session name.
+
+```text
+saved layout 'work' at ~/.config/herdr/herdr-suite/layouts/work.json
+session 'work' · 2 workspaces · 3 tabs · 6 panes
+workspace 'project' · 2 tabs · 4 panes
+tab 1 'main' · 3 panes · focus w1:p1
+...
+workspace 'api' · 1 tab · 2 panes
+...
+```
+
+The stored document gains a session form: `workspaces` instead of the single
+`workspace`, so a layout saved before forks existed still reads and re-encodes
+unchanged. `hs space load <name>` of a forked layout creates one workspace per
+stored entry, replays every one of them, and restores each workspace's focus
+last, which leaves the last stored workspace focused:
+
+```text
+loaded layout 'work' into 2 workspaces · 3 tabs · 6 panes · 18 steps
+workspace 'project' · 2 tabs · 4 panes · 11 steps
+workspace 'api' · 1 tab · 2 panes · 7 steps
+```
+
+`--replace` and `--new-workspace` describe a single destination workspace, so a
+forked layout refuses them rather than ignoring them.
+
+### Inside herdr
+
+`herdr-plugin.toml` declares three actions and the two panes they open, anchored
+to the `hs` binary in the plugin's own `bin/` directory — the layout herdr-bar
+uses for its release binary:
+
+| Action | Runs |
+| --- | --- |
+| `save` | `bin/hs space save --current`, naming the layout after the workspace it runs in |
+| `load` | the `load` pane: `bin/hs space load --select`, picking a stored layout and rebuilding it in a new workspace |
+| `list` | the `layouts` pane: `bin/hs space list --pane`, keeping the table until enter is pressed |
+
+Bind them like any plugin action:
+
+```toml
+[[keys.command]]
+key = "prefix+l"
+type = "plugin_action"
+command = "herdr-suite.list"
+```
+
+Action output lands in `herdr plugin log herdr-suite`.
+
+Two gaps are documented rather than worked around. `bin/hs` is a release
+artifact: the release workflow is the next task, and `herdr plugin link` does not
+run build commands, so link a working tree only after `make hs`. And inside
+herdr, runtime commands run with the plugin directory as their working
+directory, so project discovery there needs `--dir <path>`; herdr reports no
+project directory to a plugin command, so guessing one would be wrong.
+
 ### Layout storage
 
 Layouts live in one global directory, `$XDG_CONFIG_HOME/herdr/herdr-suite/
@@ -211,10 +352,10 @@ The herdr binary is found through `HERDR_BIN_PATH`, then `PATH`.
 | --- | --- |
 | `0` | the operation succeeded, or the user declined a confirmation |
 | `1` | herdr failed |
-| `2` | bad arguments, an invalid name, a protected session, or a missing confirmation |
+| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, or a layout name more than one place declares |
 
-Inside herdr, the plugin exposes the same operations as actions; the manifest
-declares the action list as it is filled in.
+Inside herdr, the plugin exposes the same operations as the `save`, `load` and
+`list` actions.
 
 ## Development
 
@@ -223,6 +364,7 @@ whatever `go` your environment provides.
 
 ```bash
 make build   # go build ./...
+make hs      # go build -o bin/hs ./cmd/hs, the binary the plugin runs
 make test    # go test ./...
 make vet     # go vet ./...
 make fmt     # gofmt -w .
@@ -231,7 +373,9 @@ make fmt     # gofmt -w .
 Tests never talk to a real herdr socket or binary. `internal/herdrmock`
 provides a fake `herdrmock.Client` that records calls and returns scripted
 state and errors, and the `internal/herdrcli` tests point `HERDR_BIN_PATH` at a
-stub script, so the suite is deterministic and runs offline.
+stub script, so the suite is deterministic and runs offline. The plugin manifest
+test reads `herdr-plugin.toml` with python's `tomllib` (3.11+) and skips when no
+such interpreter is installed.
 
 ## Repository layout
 

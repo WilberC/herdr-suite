@@ -89,6 +89,20 @@ func Load(dir, name string) (Layout, string, error) {
 		return Layout{}, "", err
 	}
 	path := filepath.Join(dir, FileName(name))
+	document, path, err := LoadFile(path)
+	if err != nil {
+		return Layout{}, path, err
+	}
+	if document.Name != name {
+		return Layout{}, path, fmt.Errorf("%s holds layout '%s', want '%s'", path, document.Name, name)
+	}
+	return document, path, nil
+}
+
+// LoadFile reads the layout stored at path, whatever name the document holds.
+// It is how an explicit path and a project index entry are read: the reference
+// names the file, so the stored name is not a second check.
+func LoadFile(path string) (Layout, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -99,9 +113,6 @@ func Load(dir, name string) (Layout, string, error) {
 	document, err := Unmarshal(data)
 	if err != nil {
 		return Layout{}, path, fmt.Errorf("%s: %w", path, err)
-	}
-	if document.Name != name {
-		return Layout{}, path, fmt.Errorf("%s holds layout '%s', want '%s'", path, document.Name, name)
 	}
 	return document, path, nil
 }

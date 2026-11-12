@@ -16,12 +16,73 @@ const (
 	TypeSplit = "split"
 )
 
-// Layout is one saved space: the workspace that was active when it was
-// snapshotted, with every tab's split tree.
+// Layout is one stored space. The single-workspace form holds the workspace that
+// was active when it was snapshotted; the session form holds every workspace of
+// the session a fork captured.
 type Layout struct {
-	Name      string    `json:"name"`
-	Session   string    `json:"session,omitempty"`
-	Workspace Workspace `json:"workspace"`
+	Name       string
+	Session    string
+	Workspace  Workspace
+	Workspaces []Workspace
+}
+
+// storedDocument is the file form of a layout: exactly one of the two shapes is
+// present, so a single-workspace file keeps the shape earlier versions wrote and
+// a session file carries a workspace list instead.
+type storedDocument struct {
+	Name       string      `json:"name"`
+	Session    string      `json:"session,omitempty"`
+	Workspace  *Workspace  `json:"workspace,omitempty"`
+	Workspaces []Workspace `json:"workspaces,omitempty"`
+}
+
+// MarshalJSON encodes the form the layout holds.
+func (l Layout) MarshalJSON() ([]byte, error) {
+	document := storedDocument{Name: l.Name, Session: l.Session}
+	if len(l.Workspaces) > 0 {
+		document.Workspaces = l.Workspaces
+	} else {
+		workspace := l.Workspace
+		document.Workspace = &workspace
+	}
+	return json.Marshal(document)
+}
+
+// UnmarshalJSON reads either form and refuses a document that carries both or
+// neither.
+func (l *Layout) UnmarshalJSON(data []byte) error {
+	var document storedDocument
+	if err := json.Unmarshal(data, &document); err != nil {
+		return err
+	}
+	if document.Workspace != nil && len(document.Workspaces) > 0 {
+		return errors.New("layout document holds both workspace and workspaces")
+	}
+	if document.Workspace == nil && len(document.Workspaces) == 0 {
+		return errors.New("layout document holds no workspace")
+	}
+
+	l.Name = document.Name
+	l.Session = document.Session
+	l.Workspace = Workspace{}
+	l.Workspaces = document.Workspaces
+	if document.Workspace != nil {
+		l.Workspace = *document.Workspace
+	}
+	return nil
+}
+
+// Multi reports whether the layout holds a session: every workspace of one
+// session, instead of a single workspace.
+func (l Layout) Multi() bool { return len(l.Workspaces) > 0 }
+
+// Spaces returns the workspaces the layout holds: the stored session, or the one
+// stored workspace.
+func (l Layout) Spaces() []Workspace {
+	if len(l.Workspaces) > 0 {
+		return l.Workspaces
+	}
+	return []Workspace{l.Workspace}
 }
 
 // Workspace is the snapshotted workspace.
@@ -65,26 +126,56 @@ type Agent struct {
 // session the topology was read from; it is empty when the read went to the
 // ambient session and is then left out of the document.
 func Capture(name string, space herdrmock.Space, workspace herdrmock.Workspace) (Layout, error) {
-	document := Layout{
-		Name:    name,
-		Session: space.Session,
-		Workspace: Workspace{
-			Label: workspace.Label,
-			Tabs:  make([]Tab, 0, len(workspace.Tabs)),
-		},
+	captured, err := captureWorkspace(workspace)
+	if err != nil {
+		return Layout{}, err
 	}
+	return Layout{Name: name, Session: space.Session, Workspace: captured}, nil
+}
 
+// captureWorkspace turns one live workspace into the stored workspace.
+func captureWorkspace(workspace herdrmock.Workspace) (Workspace, error) {
+	captured := Workspace{
+		Label: workspace.Label,
+		Tabs:  make([]Tab, 0, len(workspace.Tabs)),
+	}
 	for _, tab := range workspace.Tabs {
 		root, err := captureNode(tab, tab.Root)
 		if err != nil {
-			return Layout{}, err
+			return Workspace{}, err
 		}
-		document.Workspace.Tabs = append(document.Workspace.Tabs, Tab{
+		captured.Tabs = append(captured.Tabs, Tab{
 			Label:         tab.Label,
 			Focused:       tab.Focused,
 			FocusedPaneID: tab.FocusedPaneID,
 			Root:          root,
 		})
+	}
+	return captured, nil
+}
+
+// CaptureSession turns a live session into a layout named name that holds every
+// workspace it reports, in the order herdr reported them.
+func CaptureSession(name string, space herdrmock.Space) (Layout, error) {
+	if len(space.Workspaces) == 0 {
+		label := space.Session
+		if label == "" {
+			label = name
+		}
+		return Layout{}, fmt.Errorf("session '%s' reports no workspaces", label)
+	}
+
+	document := Layout{
+		Name:       name,
+		Session:    space.Session,
+		Workspaces: make([]Workspace, 0, len(space.Workspaces)),
+	}
+	for _, workspace := range space.Workspaces {
+		captured, err := captureWorkspace(workspace)
+		if err != nil {
+			return Layout{}, fmt.Errorf("workspace '%s': %w", workspace.Label, err)
+		}
+		document.Workspaces = append(document.Workspaces, captured)
 	}
 	return document, nil
 }

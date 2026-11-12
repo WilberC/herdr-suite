@@ -10,16 +10,22 @@ import (
 
 // StepError reports the replay step that failed. herdr keeps no transaction, so
 // the steps before this one stay applied and the report names the step that
-// stopped the replay.
+// stopped the replay. Workspace names the workspace of a session replay whose
+// step failed, and is empty for a single-workspace replay.
 type StepError struct {
-	Index  int
-	Total  int
-	Action Action
-	Err    error
+	Index     int
+	Total     int
+	Action    Action
+	Workspace string
+	Err       error
 }
 
 func (e StepError) Error() string {
-	return fmt.Sprintf("step %d of %d failed: %s: %v", e.Index, e.Total, e.Action.describe(), e.Err)
+	workspace := ""
+	if e.Workspace != "" {
+		workspace = fmt.Sprintf("workspace '%s': ", e.Workspace)
+	}
+	return fmt.Sprintf("%sstep %d of %d failed: %s: %v", workspace, e.Index, e.Total, e.Action.describe(), e.Err)
 }
 
 // Unwrap returns the herdr failure the step reported.

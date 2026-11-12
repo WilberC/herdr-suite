@@ -8,32 +8,61 @@ import (
 
 // Summary renders the stable report a stored layout prints: where it was saved,
 // what it holds, and one ASCII tree per tab with the split directions and
-// ratios. Labels, agent identifications and cwds hang off each pane leaf.
+// ratios. Labels, agent identifications and cwds hang off each pane leaf. A
+// session layout prints a line for the session before its workspaces.
 func Summary(document Layout, path string) string {
 	var report strings.Builder
 	fmt.Fprintf(&report, "saved layout '%s' at %s\n", document.Name, path)
 
-	tabs := document.Workspace.Tabs
+	spaces := document.Spaces()
+	if document.Multi() {
+		fmt.Fprintf(&report, "%s\n", sessionLine(document, spaces))
+	}
+	for _, workspace := range spaces {
+		writeWorkspace(&report, workspace)
+	}
+	return report.String()
+}
+
+// sessionLine is the header of a session layout: the session it was forked from
+// when that is known, then the totals of every stored workspace.
+func sessionLine(document Layout, spaces []Workspace) string {
+	tabs, panes := 0, 0
+	for _, workspace := range spaces {
+		tabs += len(workspace.Tabs)
+		for _, tab := range workspace.Tabs {
+			panes += countPanes(tab.Root)
+		}
+	}
+	parts := []string{plural(len(spaces), "workspace"), plural(tabs, "tab"), plural(panes, "pane")}
+	if document.Session != "" {
+		parts = append([]string{fmt.Sprintf("session '%s'", document.Session)}, parts...)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// writeWorkspace prints one workspace and the tree of each of its tabs.
+func writeWorkspace(report *strings.Builder, workspace Workspace) {
+	tabs := workspace.Tabs
 	total := 0
 	for _, tab := range tabs {
 		total += countPanes(tab.Root)
 	}
-	fmt.Fprintf(&report, "workspace '%s' · %s · %s\n",
-		document.Workspace.Label, plural(len(tabs), "tab"), plural(total, "pane"))
+	fmt.Fprintf(report, "workspace '%s' · %s · %s\n",
+		workspace.Label, plural(len(tabs), "tab"), plural(total, "pane"))
 
 	for index, tab := range tabs {
-		fmt.Fprintf(&report, "tab %d", index+1)
+		fmt.Fprintf(report, "tab %d", index+1)
 		if tab.Label != "" {
-			fmt.Fprintf(&report, " '%s'", tab.Label)
+			fmt.Fprintf(report, " '%s'", tab.Label)
 		}
 		line := []string{plural(countPanes(tab.Root), "pane")}
 		if tab.FocusedPaneID != "" {
 			line = append(line, "focus "+tab.FocusedPaneID)
 		}
-		fmt.Fprintf(&report, " · %s\n", strings.Join(line, " · "))
-		writeNode(&report, tab.Root, "", "")
+		fmt.Fprintf(report, " · %s\n", strings.Join(line, " · "))
+		writeNode(report, tab.Root, "", "")
 	}
-	return report.String()
 }
 
 // ReplaySummary renders the stable report a completed replay prints: the layout
@@ -42,6 +71,20 @@ func ReplaySummary(replay Replay) string {
 	return fmt.Sprintf("loaded layout '%s' into workspace '%s' · %s · %s · %s\n",
 		replay.Layout, replay.Workspace,
 		plural(replay.Tabs, "tab"), plural(replay.Panes, "pane"), plural(len(replay.Actions), "step"))
+}
+
+// SessionReplaySummary renders the stable report a completed session replay
+// prints: a total line, then what every recreated workspace holds.
+func SessionReplaySummary(plan SessionPlan) string {
+	var report strings.Builder
+	fmt.Fprintf(&report, "loaded layout '%s' into %s · %s · %s · %s\n",
+		plan.Layout, plural(len(plan.Workspaces), "workspace"),
+		plural(plan.Tabs, "tab"), plural(plan.Panes, "pane"), plural(plan.Steps, "step"))
+	for _, replay := range plan.Workspaces {
+		fmt.Fprintf(&report, "workspace '%s' · %s · %s · %s\n", replay.Workspace,
+			plural(replay.Tabs, "tab"), plural(replay.Panes, "pane"), plural(len(replay.Actions), "step"))
+	}
+	return report.String()
 }
 
 // writeNode renders one tree node and its subtree. branch is the connector the

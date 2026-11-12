@@ -100,6 +100,8 @@ func newSpaceRun(t *testing.T, sessions ...herdrmock.Session) *spaceRun {
 			}
 			return ""
 		},
+		cwd: func() (string, error) { return configDir, nil },
+		in:  strings.NewReader(""),
 		out: run.stdout,
 		err: run.stderr,
 	}

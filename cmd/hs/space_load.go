@@ -22,10 +22,20 @@ and pane are focused last.
 A workspace holding a single idle pane is the empty case: that pane becomes the
 first pane of the layout. A workspace with more panes or tabs needs --replace.
 
+A session layout holds every workspace of a forked session: loading one creates
+each workspace it stores instead of building over the current one, so --replace
+and --new-workspace do not apply to it.
+
+The layout name is resolved the same way the list resolves it: by path when it
+holds a separator, then in the nearest project declaration under .herdr/, then in
+the global store.
+
 Options:
   --session <name>  Replay into that session instead of the current one
   --replace         Close the workspace's other panes and tabs before the replay
   --new-workspace   Build the layout in a new workspace instead of this one
+  --select          Pick the layout interactively, in a new workspace
+  --dir <path>      Discover layouts from that directory instead of this one
   --dry-run         Print the replay plan and change nothing
 `
 
@@ -33,8 +43,10 @@ Options:
 type loadOptions struct {
 	name         string
 	session      string
+	dir          string
 	replace      bool
 	newWorkspace bool
+	selecting    bool
 	dryRun       bool
 }
 
@@ -43,21 +55,32 @@ func runSpaceLoad(d deps, args []string) int {
 	if err != nil {
 		return report(err, d.err)
 	}
-	name, err := session.SanitizeName(options.name, "layout")
-	if err != nil {
-		return report(usageError{reason: err.Error(), usage: spaceLoadUsage}, d.err)
-	}
-
-	dir, err := layout.Dir(d.getenv)
+	reference, err := loadReference(d, options)
 	if err != nil {
 		return report(err, d.err)
 	}
-	document, _, err := layout.Load(dir, name)
+	if !layout.IsPath(reference) {
+		name, err := session.SanitizeName(reference, "layout")
+		if err != nil {
+			return report(usageError{reason: err.Error(), usage: spaceLoadUsage}, d.err)
+		}
+		reference = name
+	}
+
+	sources, err := layoutSources(d, options.dir)
+	if err != nil {
+		return report(err, d.err)
+	}
+	document, _, err := layout.Resolve(sources, reference)
 	if err != nil {
 		var missing layout.NotFoundError
 		if errors.As(err, &missing) {
 			return report(session.Refusal{Reason: fmt.Sprintf(
-				"unknown layout '%s'; create it with hs space save %s", name, name)}, d.err)
+				"unknown layout '%s'; create it with hs space save %s", reference, reference)}, d.err)
+		}
+		var ambiguous layout.AmbiguousError
+		if errors.As(err, &ambiguous) {
+			return report(session.Refusal{Reason: ambiguous.Error()}, d.err)
 		}
 		return report(err, d.err)
 	}
@@ -71,6 +94,9 @@ func runSpaceLoad(d deps, args []string) int {
 	space, err := d.spaces.Snapshot(ctx, target)
 	if err != nil {
 		return report(fmt.Errorf("snapshot %s: %w", describeTarget(target), err), d.err)
+	}
+	if document.Multi() {
+		return loadSessionLayout(d, options, target, space, document)
 	}
 
 	destination, err := loadDestination(d, target, space, document, options)
@@ -103,6 +129,75 @@ func runSpaceLoad(d deps, args []string) int {
 	return 0
 }
 
+// loadReference is the layout reference a load starts from: the stored name, or
+// the file the interactive picker selects.
+func loadReference(d deps, options loadOptions) (string, error) {
+	if !options.selecting {
+		return options.name, nil
+	}
+	if !d.interactive || d.pickLayout == nil {
+		return "", session.Refusal{Reason: "the layout picker needs a terminal; pass a layout name"}
+	}
+
+	sources, err := layoutSources(d, options.dir)
+	if err != nil {
+		return "", err
+	}
+	entries, err := layout.List(sources)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) == 0 {
+		return "", session.Refusal{Reason: "no layout is stored here; create one with hs space save"}
+	}
+
+	picked, err := d.pickLayout(entries)
+	if err != nil {
+		return "", err
+	}
+	if picked == "" {
+		return "", session.ErrCancelled
+	}
+	return picked, nil
+}
+
+// loadSessionLayout replays a session layout: every workspace it stores is
+// created again, and the last one ends focused.
+func loadSessionLayout(d deps, options loadOptions, target herdrmock.Target, space herdrmock.Space, document layout.Layout) int {
+	if options.replace || options.newWorkspace {
+		return report(usageError{
+			reason: fmt.Sprintf(
+				"--replace and --new-workspace only apply to a single-workspace layout; '%s' holds %s, and a session load creates every one of them",
+				document.Name, countLabel(len(document.Workspaces), "workspace")),
+			usage: spaceLoadUsage,
+		}, d.err)
+	}
+
+	plan, err := layout.PlanSession(document, layout.Target{
+		Keep:   d.getenv("HERDR_PANE_ID"),
+		Agents: liveAgents(space),
+	})
+	if err != nil {
+		return report(err, d.err)
+	}
+	if options.dryRun {
+		fmt.Fprint(d.out, layout.RenderSessionPlan(plan))
+		return 0
+	}
+
+	if err := layout.ApplySession(context.Background(), d.writer.Mutations(target), plan); err != nil {
+		var step layout.StepError
+		if !errors.As(err, &step) {
+			return report(err, d.err)
+		}
+		fmt.Fprintf(d.err, "hs: %v\n", err)
+		fmt.Fprintf(d.err, "hs: herdr has no transaction, so the session may hold a partial layout. Remove the workspaces, tabs or panes it created and load again.\n")
+		return 1
+	}
+	fmt.Fprint(d.out, layout.SessionReplaySummary(plan))
+	return 0
+}
+
 // parseLoadArgs reads "<name> [options]" in any order and rejects anything else
 // before a client call happens.
 func parseLoadArgs(args []string) (loadOptions, error) {
@@ -117,6 +212,14 @@ func parseLoadArgs(args []string) (loadOptions, error) {
 			options.newWorkspace = true
 		case arg == "--dry-run":
 			options.dryRun = true
+		case arg == "--select":
+			options.selecting = true
+		case arg == "--dir":
+			if index+1 >= len(args) {
+				return loadOptions{}, usageError{reason: "--dir needs a directory", usage: spaceLoadUsage}
+			}
+			index++
+			options.dir = args[index]
 		case arg == "--session":
 			if index+1 >= len(args) {
 				return loadOptions{}, usageError{reason: "--session needs a session name", usage: spaceLoadUsage}
@@ -128,6 +231,15 @@ func parseLoadArgs(args []string) (loadOptions, error) {
 		default:
 			names = append(names, arg)
 		}
+	}
+	if options.selecting {
+		if len(names) != 0 {
+			return loadOptions{}, usageError{reason: "--select picks the layout, so pass no layout name", usage: spaceLoadUsage}
+		}
+		if options.replace {
+			return loadOptions{}, usageError{reason: "--select builds in a new workspace, so --replace does not apply", usage: spaceLoadUsage}
+		}
+		return options, nil
 	}
 	if len(names) != 1 {
 		return loadOptions{}, usageError{reason: "expected one layout name", usage: spaceLoadUsage}
@@ -145,7 +257,7 @@ func loadDestination(d deps, target herdrmock.Target, space herdrmock.Space, doc
 		Keep:    d.getenv("HERDR_PANE_ID"),
 		Agents:  liveAgents(space),
 	}
-	if options.newWorkspace {
+	if options.newWorkspace || options.selecting {
 		return destination, nil
 	}
 

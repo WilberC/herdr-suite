@@ -42,6 +42,7 @@ Commands:
   stop <name> [--yes]     Stop a session
   restart <name> [--yes]  Stop a session so the next attach starts it fresh
   delete <name> [--yes]   Stop and delete a session
+  fork [session] [layout] Snapshot every workspace of a session as one layout
 
 Names may hold letters, digits, '.', '_' and '-'; whitespace runs become '-'.
 Destructive commands need --yes when stdin is not a terminal.
@@ -85,10 +86,13 @@ type deps struct {
 	writer      herdrmock.Writer
 	exec        session.Execer
 	getenv      func(string) string
+	cwd         func() (string, error)
+	in          io.Reader
 	interactive bool
 	confirm     session.Confirmer
 	switcher    func(context.Context) (string, error)
 	pick        func([]herdrmock.Workspace) (string, error)
+	pickLayout  func([]layout.Entry) (string, error)
 	out         io.Writer
 	err         io.Writer
 }
@@ -109,6 +113,8 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 		writer:      herdr,
 		exec:        herdrcli.Execer{},
 		getenv:      os.Getenv,
+		cwd:         os.Getwd,
+		in:          os.Stdin,
 		interactive: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
 		out:         stdout,
 		err:         stderr,
@@ -120,6 +126,9 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 	if d.interactive {
 		d.pick = func(workspaces []herdrmock.Workspace) (string, error) {
 			return pickWorkspace(os.Stdin, stdout, workspaces)
+		}
+		d.pickLayout = func(entries []layout.Entry) (string, error) {
+			return pickLayout(os.Stdin, stdout, entries)
 		}
 	}
 	return d
@@ -184,7 +193,7 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if hasHelp(args[1:]) {
-		fmt.Fprint(stdout, cmd.usage)
+		fmt.Fprint(stdout, helpFor(cmd, args[1:]))
 		return 0
 	}
 
@@ -247,6 +256,8 @@ func runSession(d deps, args []string) int {
 		return runSessionAction(d, args[1:], actionRestart)
 	case "delete":
 		return runSessionAction(d, args[1:], actionDelete)
+	case "fork":
+		return runSessionFork(d, args[1:])
 	}
 
 	fmt.Fprintf(d.err, "unknown session command %q\n\n%s", args[0], sessionUsage)
@@ -364,6 +375,30 @@ func report(err error, stderr io.Writer) int {
 
 	fmt.Fprintf(stderr, "hs: %v\n", err)
 	return 1
+}
+
+// groupUsage is the help a subcommand prints for itself. A subcommand without
+// an entry falls back to the help of its group.
+var groupUsage = map[string]map[string]string{
+	"space": {
+		"save": spaceSaveUsage,
+		"load": spaceLoadUsage,
+		"list": spaceListUsage,
+	},
+	"session": {
+		"fork": sessionForkUsage,
+	},
+}
+
+// helpFor is the text a help flag prints: the subcommand's own usage when it has
+// one, otherwise the usage of the command group.
+func helpFor(cmd command, args []string) string {
+	if len(args) > 0 {
+		if usage, ok := groupUsage[cmd.name][args[0]]; ok {
+			return usage
+		}
+	}
+	return cmd.usage
 }
 
 func lookup(name string) (command, bool) {
