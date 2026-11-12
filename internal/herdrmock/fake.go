@@ -12,11 +12,13 @@ type Fake struct {
 	Sessions   []Session
 	Panes      map[string]Pane
 	Workspaces map[string]Workspace
+	Spaces     map[string]Space
 	NextPaneID string
 
 	ListSessionsErr  error
 	StopSessionErr   error
 	DeleteSessionErr error
+	SnapshotErr      error
 	WorkspaceErr     error
 	PaneErr          error
 	SplitPaneErr     error
@@ -60,6 +62,21 @@ func (f *Fake) DeleteSession(ctx context.Context, name string) error {
 	return f.DeleteSessionErr
 }
 
+// Snapshot returns the scripted topology for the target session. A target name
+// that was not scripted reports an error, so a test can exercise the fallbacks
+// that depend on a session being unreadable.
+func (f *Fake) Snapshot(ctx context.Context, target Target) (Space, error) {
+	f.record("Snapshot", target.Name)
+	if f.SnapshotErr != nil {
+		return Space{}, f.SnapshotErr
+	}
+	space, ok := f.Spaces[target.Name]
+	if !ok {
+		return Space{}, fmt.Errorf("unknown session topology %q", target.Name)
+	}
+	return space, nil
+}
+
 // Workspace returns the scripted topology for workspaceID.
 func (f *Fake) Workspace(ctx context.Context, workspaceID string) (Workspace, error) {
 	f.record("Workspace", workspaceID)
@@ -101,4 +118,7 @@ func (f *Fake) StartAgent(ctx context.Context, req StartAgentRequest) error {
 	return f.StartAgentErr
 }
 
-var _ Client = (*Fake)(nil)
+var (
+	_ Client      = (*Fake)(nil)
+	_ SpaceClient = (*Fake)(nil)
+)

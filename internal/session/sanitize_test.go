@@ -91,3 +91,20 @@ func TestSanitizeSessionName(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeNameWordsTheRefusalForItsKind(t *testing.T) {
+	got, err := SanitizeName("my layout!", "layout")
+
+	if got != "" {
+		t.Fatalf("SanitizeName = %q on error, want empty", got)
+	}
+	want := "invalid layout name 'my-layout!'; use letters, digits, '.', '_' and '-'"
+	if err == nil || err.Error() != want {
+		t.Fatalf("SanitizeName error = %v, want %q", err, want)
+	}
+
+	name, err := SanitizeName("my layout", "layout")
+	if err != nil || name != "my-layout" {
+		t.Fatalf("SanitizeName = %q, %v, want %q without error", name, err, "my-layout")
+	}
+}

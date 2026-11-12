@@ -7,9 +7,12 @@ type Session struct {
 	Name    string
 	Running bool
 	Default bool
+	Socket  string
 }
 
-// Pane is one terminal pane inside a tab.
+// Pane is one terminal pane inside a tab. Agent and AgentState are what herdr
+// reports about the agent running in the pane, so they are empty for a plain
+// shell.
 type Pane struct {
 	ID          string
 	WorkspaceID string
@@ -17,6 +20,8 @@ type Pane struct {
 	Label       string
 	Cwd         string
 	Agent       string
+	AgentName   string
+	AgentState  string
 }
 
 // LayoutNode is one node of a tab's split tree. A leaf names a pane; a split
@@ -28,18 +33,45 @@ type LayoutNode struct {
 	Children  []LayoutNode
 }
 
-// Tab is one herdr tab with its pane split tree.
+// Tab is one herdr tab with its panes and their split tree.
 type Tab struct {
-	ID    string
-	Title string
-	Root  LayoutNode
+	ID            string
+	Label         string
+	Focused       bool
+	FocusedPaneID string
+	Panes         []Pane
+	Root          LayoutNode
 }
 
 // Workspace is a herdr workspace with the tabs it holds.
 type Workspace struct {
-	ID   string
-	Name string
-	Tabs []Tab
+	ID          string
+	Label       string
+	Focused     bool
+	ActiveTabID string
+	AgentState  string
+	TabCount    int
+	PaneCount   int
+	Tabs        []Tab
+}
+
+// Space is a session's live topology: its workspaces and, per workspace, the
+// tabs with their pane split trees. Session names the session the topology was
+// read from, and is empty when the read went to the ambient session.
+type Space struct {
+	Session            string
+	FocusedWorkspaceID string
+	FocusedTabID       string
+	FocusedPaneID      string
+	Workspaces         []Workspace
+}
+
+// Target selects the herdr session a topology read talks to: Socket when it is
+// known, or the session this process already talks to when both fields are
+// empty.
+type Target struct {
+	Name   string
+	Socket string
 }
 
 // SplitRequest describes "herdr pane split" arguments.
@@ -74,9 +106,16 @@ type SessionClient interface {
 	DeleteSession(ctx context.Context, name string) error
 }
 
+// SpaceClient is the part of Client that reads a session's topology: the
+// workspaces, their tabs, and every tab's pane split tree.
+type SpaceClient interface {
+	Snapshot(ctx context.Context, target Target) (Space, error)
+}
+
 // Client is the minimal herdr surface herdr-suite depends on.
 type Client interface {
 	SessionClient
+	SpaceClient
 	Workspace(ctx context.Context, workspaceID string) (Workspace, error)
 	Pane(ctx context.Context, paneID string) (Pane, error)
 	SplitPane(ctx context.Context, req SplitRequest) (string, error)

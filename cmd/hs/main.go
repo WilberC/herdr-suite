@@ -10,6 +10,7 @@ import (
 
 	"github.com/WilberC/herdr-suite/internal/herdrcli"
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
+	"github.com/WilberC/herdr-suite/internal/layout"
 	"github.com/WilberC/herdr-suite/internal/session"
 	"github.com/mattn/go-isatty"
 )
@@ -66,10 +67,7 @@ var commands = []command{
 	{
 		name:    "space",
 		summary: "Save and restore herdr spaces",
-		usage: `usage: hs space [command]
-
-Save and restore herdr spaces, including pane layout, labels and commands.
-`,
+		usage:   spaceUsage,
 	},
 	{
 		name:    "layout",
@@ -83,6 +81,7 @@ List and inspect stored layouts.
 
 type deps struct {
 	client      herdrmock.SessionClient
+	spaces      herdrmock.SpaceClient
 	exec        session.Execer
 	getenv      func(string) string
 	interactive bool
@@ -101,8 +100,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func defaultDeps(stdout, stderr io.Writer) deps {
+	herdr := herdrcli.New()
 	d := deps{
-		client:      herdrcli.New(),
+		client:      herdr,
+		spaces:      herdr,
 		exec:        herdrcli.Execer{},
 		getenv:      os.Getenv,
 		interactive: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
@@ -135,6 +136,7 @@ func defaultSwitcher(d deps, out io.Writer) func(context.Context) (string, error
 		switcher := session.NewSwitcher(session.SwitcherConfig{
 			Manager:     d.manager(true),
 			RestartFlag: path,
+			Preview:     session.SpacePreviewer{Client: d.spaces},
 		})
 		if err := switcher.Prepare(ctx); err != nil {
 			return "", err
@@ -183,6 +185,8 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 		return runAttach(d, args[1:])
 	case "session":
 		return runSession(d, args[1:])
+	case "space":
+		return runSpace(d, args[1:])
 	}
 
 	fmt.Fprintf(stderr, "%s: not implemented\n\n%s", cmd.name, cmd.usage)
@@ -342,6 +346,11 @@ func report(err error, stderr io.Writer) int {
 	var refusal session.Refusal
 	if errors.As(err, &refusal) {
 		fmt.Fprintf(stderr, "hs: %s\n", refusal.Reason)
+		return 2
+	}
+	var stored layout.ExistsError
+	if errors.As(err, &stored) {
+		fmt.Fprintf(stderr, "hs: %v\n", err)
 		return 2
 	}
 

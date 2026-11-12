@@ -25,14 +25,32 @@ func fixture() *herdrmock.Fake {
 				Agent:       "pi",
 			},
 		},
+		Spaces: map[string]herdrmock.Space{
+			"": {
+				Session:            "work",
+				FocusedWorkspaceID: "w-1",
+				FocusedTabID:       "t-1",
+				FocusedPaneID:      "p-1",
+				Workspaces: []herdrmock.Workspace{
+					{
+						ID:         "w-1",
+						Label:      "project",
+						Focused:    true,
+						TabCount:   1,
+						PaneCount:  2,
+						AgentState: "working",
+					},
+				},
+			},
+		},
 		Workspaces: map[string]herdrmock.Workspace{
 			"w-1": {
-				ID:   "w-1",
-				Name: "project",
+				ID:    "w-1",
+				Label: "project",
 				Tabs: []herdrmock.Tab{
 					{
 						ID:    "t-1",
-						Title: "main",
+						Label: "main",
 						Root: herdrmock.LayoutNode{
 							Direction: "right",
 							Ratio:     0.6,
@@ -128,6 +146,24 @@ func TestClientContract(t *testing.T) {
 			},
 			wantErr:   errors.New(`unknown workspace "w-missing"`),
 			wantCalls: []herdrmock.Call{{Method: "Workspace", Target: "w-missing"}},
+		},
+		{
+			name: "snapshot returns the scripted space",
+			fake: fixture,
+			call: func(ctx context.Context, client herdrmock.Client) (any, error) {
+				return herdrmock.SpaceClient(client).Snapshot(ctx, herdrmock.Target{})
+			},
+			want:      fixture().Spaces[""],
+			wantCalls: []herdrmock.Call{{Method: "Snapshot"}},
+		},
+		{
+			name: "snapshot records an explicit session",
+			fake: fixture,
+			call: func(ctx context.Context, client herdrmock.Client) (any, error) {
+				return herdrmock.SpaceClient(client).Snapshot(ctx, herdrmock.Target{Name: "work", Socket: "/tmp/work.sock"})
+			},
+			wantErr:   errors.New(`unknown session topology "work"`),
+			wantCalls: []herdrmock.Call{{Method: "Snapshot", Target: "work"}},
 		},
 		{
 			name: "pane returns the scripted pane",

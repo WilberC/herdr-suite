@@ -30,6 +30,7 @@ func newTestDeps() (deps, *herdrmock.Fake, *fakeExecer) {
 	exec := &fakeExecer{}
 	return deps{
 		client: client,
+		spaces: client,
 		exec:   exec,
 		getenv: func(string) string { return "" },
 		switcher: func(context.Context) (string, error) {
@@ -118,10 +119,10 @@ func TestRunContract(t *testing.T) {
 			wantStderr: []string{`unknown command "bogus"`, "usage: hs"},
 		},
 		{
-			name:       "the space command still reports not implemented",
+			name:       "bare space prints its usage on stderr",
 			args:       []string{"space"},
 			wantExit:   2,
-			wantStderr: []string{"space: not implemented", "usage: hs space"},
+			wantStderr: []string{"usage: hs space", "save <name>"},
 		},
 		{
 			name:       "the layout command still reports not implemented",

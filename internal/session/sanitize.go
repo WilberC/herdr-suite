@@ -25,6 +25,13 @@ var ErrCancelled = errors.New("cancelled")
 // hold letters, digits, '.', '_' and '-'. The old herdr-sessionizer applied the
 // same two rules before a name reached herdr.
 func Sanitize(raw string) (string, error) {
+	return SanitizeName(raw, "session")
+}
+
+// SanitizeName applies the session rules to any name herdr-suite stores, and
+// words the refusal for the kind the caller asked about, so a layout name is
+// never reported as a session name.
+func SanitizeName(raw, kind string) (string, error) {
 	var name strings.Builder
 	pendingDash := false
 	for _, r := range raw {
@@ -41,12 +48,13 @@ func Sanitize(raw string) (string, error) {
 
 	sanitized := strings.Trim(name.String(), "-")
 	if sanitized == "" {
-		return "", Refusal{Reason: "session name is empty"}
+		return "", Refusal{Reason: kind + " name is empty"}
 	}
 	for _, r := range sanitized {
 		if !validNameRune(r) {
 			return "", Refusal{Reason: fmt.Sprintf(
-				"invalid session name '%s'; use letters, digits, '.', '_' and '-'",
+				"invalid %s name '%s'; use letters, digits, '.', '_' and '-'",
+				kind,
 				sanitized,
 			)}
 		}

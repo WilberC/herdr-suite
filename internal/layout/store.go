@@ -1,0 +1,100 @@
+package layout
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+)
+
+// ExistsError reports a layout that is already stored under the same name.
+type ExistsError struct {
+	Path string
+}
+
+func (e ExistsError) Error() string {
+	return fmt.Sprintf("layout already exists at %s; pass --force to overwrite", e.Path)
+}
+
+// Dir returns the global layout directory: <XDG_CONFIG_HOME>/herdr/herdr-suite/
+// layouts, or the same path under $HOME/.config when XDG_CONFIG_HOME is unset.
+// getenv reads the environment, so callers and tests share one resolution.
+func Dir(getenv func(string) string) (string, error) {
+	if base := getenv("XDG_CONFIG_HOME"); base != "" {
+		return filepath.Join(base, "herdr", "herdr-suite", "layouts"), nil
+	}
+	home := getenv("HOME")
+	if home == "" {
+		return "", errNoConfigHome
+	}
+	return filepath.Join(home, ".config", "herdr", "herdr-suite", "layouts"), nil
+}
+
+// FileName is the file a layout named name is stored in.
+func FileName(name string) string {
+	return name + ".json"
+}
+
+// Save stores document in dir and returns the path it wrote. A stored layout is
+// never replaced unless force is set, and a name that could escape dir is
+// refused.
+func Save(dir string, document Layout, force bool) (string, error) {
+	if err := validateName(document.Name); err != nil {
+		return "", err
+	}
+	data, err := Marshal(document)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create layout directory: %w", err)
+	}
+
+	path := filepath.Join(dir, FileName(document.Name))
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	if force {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+	file, err := os.OpenFile(path, flags, 0o644)
+	if err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return "", ExistsError{Path: path}
+		}
+		return "", fmt.Errorf("create layout: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return "", fmt.Errorf("write layout: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("write layout: %w", err)
+	}
+	return path, nil
+}
+
+// validateName keeps a layout name inside its directory. Names reach this
+// package already sanitized, so this is the last guard, not a user-facing rule.
+func validateName(name string) error {
+	if name == "" || name == "." || name == ".." {
+		return fmt.Errorf("invalid layout name '%s'", name)
+	}
+	for _, r := range name {
+		if !validNameRune(r) {
+			return fmt.Errorf("invalid layout name '%s'", name)
+		}
+	}
+	return nil
+}
+
+func validNameRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	}
+	return r == '.' || r == '_' || r == '-'
+}

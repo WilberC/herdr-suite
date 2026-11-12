@@ -9,15 +9,15 @@ confirmation, and non-interactive commands keep stable exit codes and stdout.
 
 ## Status
 
-`hs` replaces `herdr-sessionizer`: the interactive switcher and the session
-lifecycle commands are implemented. What still renders a scaffold is layout
-work:
+`hs` replaces `herdr-sessionizer`: the interactive switcher, the session
+lifecycle commands and space snapshots are implemented.
 
 - `hs` and `hs session ...` manage sessions.
-- `hs space` and `hs layout` report `not implemented` and exit `2`.
+- `hs space save` snapshots the active workspace as a stored layout.
+- `hs space load` and `hs layout` still report `not implemented` and exit `2`.
 - `internal/herdrmock` is the offline fake of the herdr surface used by tests.
 
-Layout save/restore, `session fork` and the plugin actions follow.
+Layout restore, `session fork` and the plugin actions follow.
 
 ## Install
 
@@ -44,6 +44,10 @@ hs session create "my project"  # creates my-project by attaching it
 hs session stop work --yes      # stop work
 hs session restart work --yes   # stop it so the next attach starts fresh
 hs session delete scratch --yes # stop it first, then delete it
+hs space save work              # snapshot the active workspace as "work"
+hs space save work --force      # replace a stored layout of the same name
+hs space save work --session api  # snapshot another session's active workspace
+hs space save work --json       # print the snapshot document instead of the report
 ```
 
 Session names are sanitized before they reach herdr: whitespace runs become
@@ -57,6 +61,46 @@ the output is deterministic. `--json` mirrors the field names of
 Destructive commands ask for a confirmation when stdin is a terminal, and
 require `--yes` otherwise. Deleting stops the session first, because herdr only
 deletes stopped sessions, and the default session cannot be deleted at all.
+
+### Spaces
+
+`hs space save <name>` reads the session this process already talks to — the
+herdr session containing the pane `hs` runs in — and stores its active
+workspace: every tab, and each tab's split tree with split directions, ratios,
+pane labels, pane cwds and agent identifications (kind, name when herdr reports
+one, and its reported state). `--session <name>` reads another running session
+through that session's socket instead.
+
+herdr reports no command for a plain shell pane, so no command is recorded
+rather than a guessed one. Restoring such a pane opens its shell in its cwd.
+
+A saved layout prints one stable report: where it was stored, the workspace
+with its tab and pane counts, and one ASCII tree per tab:
+
+```text
+saved layout 'work' at ~/.config/herdr/herdr-suite/layouts/work.json
+workspace 'dotfiles' · 1 tab · 1 pane
+tab 1 '1' · 1 pane · focus w35:p7
+pane w35:p7 · pi working · /home/wilber/dotfiles
+```
+
+`--json` prints the snapshot document instead, so scripts and the future load
+command share one machine-readable shape.
+
+### Layout storage
+
+Layouts live in one global directory, `$XDG_CONFIG_HOME/herdr/herdr-suite/
+layouts` (or `~/.config/herdr/herdr-suite/layouts` when `XDG_CONFIG_HOME` is
+unset). The file name is the layout name plus `.json`, and names follow the
+session rules: whitespace runs become one `-`, and only letters, digits, `.`,
+`_` and `-` are kept. Saving refuses to replace a stored layout unless `--force`
+is passed.
+
+Layouts are JSON, not TOML: Go's standard library ships a JSON encoder and
+decoder, while TOML would need a third-party dependency, and the schema is a
+nested split tree, which JSON represents directly. One format also means the
+stored file, the `--json` output and the in-memory snapshot cannot disagree.
+The schema is documented in `internal/layout/doc.go`.
 
 ### Switcher
 
@@ -79,6 +123,11 @@ title (`herdr:<name>`), which names the session for the life of the terminal
 window. Restarting is a stop plus an attach: the stop happens in the switcher,
 the name is left in a temp file, and the attach happens once the switcher
 exits.
+
+The switcher shows the highlighted session's workspaces beside the list —
+labels, tab and pane counts, and herdr's agent state — read through the same
+access layer that space snapshots use. A session that cannot be read shows
+`unavailable`, and a stopped one shows that it is stopped without a read.
 
 The herdr binary is found through `HERDR_BIN_PATH`, then `PATH`.
 
@@ -116,8 +165,8 @@ stub script, so the suite is deterministic and runs offline.
 | --- | --- |
 | `cmd/hs/` | the `hs` entry point and its subcommand table |
 | `internal/session/` | session lifecycle, the switcher, and the table/JSON output |
-| `internal/herdrcli/` | the herdr client: the CLI calls and the process replacement |
+| `internal/herdrcli/` | the herdr client: the CLI calls, the topology snapshot and the process replacement |
 | `internal/herdrmock/` | the herdr client interface and the offline fake |
-| `internal/layout/` | layout discovery, storage, snapshot and restore |
+| `internal/layout/` | the layout schema, its storage directory and the snapshot report |
 | `herdr-plugin.toml` | the herdr plugin manifest |
 | `odd/tasks/herdr-suite.md` | the working spec and task log |
