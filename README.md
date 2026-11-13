@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/WilberC/herdr-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/WilberC/herdr-suite/actions/workflows/ci.yml)
 [![release](https://github.com/WilberC/herdr-suite/actions/workflows/release.yml/badge.svg)](https://github.com/WilberC/herdr-suite/actions/workflows/release.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Session switching and workspace layout snapshots for
 [herdr](https://herdr.dev)** — one Go binary, two surfaces: an interactive
@@ -84,6 +85,9 @@ binary is built to run from scripts and plugin actions, not only from hands.
 
 ## License
 
-No license file is published yet; the terms are the owner's to set.
+[MIT](LICENSE).
 
-Development, tests and the release flow: [docs/development.md](docs/development.md).
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · Changes:
+[CHANGELOG.md](CHANGELOG.md) · Security:
+[.github/SECURITY.md](.github/SECURITY.md) · Development:
+[docs/development.md](docs/development.md).

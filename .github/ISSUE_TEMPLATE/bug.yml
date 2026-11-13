@@ -1,0 +1,32 @@
+name: Bug report
+description: Something does not behave as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the exact command, its stdout, stderr and exit code.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: Cite the doc section that names the behavior you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: `hs doctor` output
+      description: Run `hs doctor` and paste the result. It answers most environment questions.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS, architecture and terminal (for example Linux amd64 in WezTerm over SSH).
+    validations:
+      required: true

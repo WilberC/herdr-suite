@@ -86,6 +86,8 @@ make hs                                    # build bin/hs (dev binary)
 | `hs version`, `hs doctor`, exit codes | [`docs/health.md`](docs/health.md) |
 | Tests, workflows, release flow, repo layout | [`docs/development.md`](docs/development.md) |
 | What was decided and why, for every feature | `odd/tasks/herdr-suite.md` § Log |
+| How to contribute and what is reviewed | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| What changed in each release | [`CHANGELOG.md`](CHANGELOG.md) |
 
 ## Adding a command
 

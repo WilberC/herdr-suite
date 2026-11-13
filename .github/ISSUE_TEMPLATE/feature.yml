@@ -1,0 +1,25 @@
+name: Feature request
+description: A capability herdr-suite does not have yet
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can you not do today, and what do you do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: The command, flag or behavior as you would expect to use it.
+    validations:
+      required: true
+  - type: checkboxes
+    id: default-off
+    attributes:
+      label: Scope
+      description: herdr-suite keeps new user-facing behavior off until the user asks for it. Are you describing something that could ship behind a toggle?
+      options:
+        - label: This could ship behind a config toggle
