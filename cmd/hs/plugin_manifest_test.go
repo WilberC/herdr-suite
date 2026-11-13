@@ -180,8 +180,9 @@ func TestPluginActionsCoverSaveLoadAndList(t *testing.T) {
 // hsSubcommands mirrors the subcommand table the CLI dispatches on. The test
 // fails when the manifest names something this table does not hold.
 var hsSubcommands = map[string]map[string]bool{
-	"space":   {"save": true, "load": true, "list": true},
-	"session": {"list": true, "create": true, "stop": true, "restart": true, "delete": true, "fork": true},
+	"space":      {"save": true, "load": true, "list": true},
+	"session":    {"list": true, "create": true, "stop": true, "restart": true, "delete": true, "fork": true},
+	"gs-restore": {"install": true, "remove": true, "status": true, "startup": true},
 }
 
 func usageFor(key string) string {
@@ -196,6 +197,14 @@ func usageFor(key string) string {
 		return spaceListUsage
 	case "session fork":
 		return sessionForkUsage
+	case "gs-restore install":
+		return gsRestoreInstallUsage
+	case "gs-restore remove":
+		return gsRestoreRemoveUsage
+	case "gs-restore status":
+		return gsRestoreStatusUsage
+	case "gs-restore startup":
+		return gsRestoreStartupUsage
 	case "session":
 		return sessionUsage
 	}

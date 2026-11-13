@@ -375,7 +375,7 @@ func TestRemovedLayoutScaffoldIsGone(t *testing.T) {
 	}
 	for _, cmd := range commands {
 		switch cmd.name {
-		case "attach", "session", "space":
+		case "attach", "session", "space", "gs-restore":
 		default:
 			t.Fatalf("the command table holds %q, want only implemented commands", cmd.name)
 		}

@@ -24,8 +24,10 @@ session forks and the plugin actions are implemented.
 - `hs space load` recreates a stored layout, in a workspace or as every
   workspace a fork captured.
 - `hs space list` lists the layouts visible from the current directory.
-- `herdr-plugin.toml` declares the `save`, `load` and `list` actions and the two
-  panes they open.
+- `herdr-plugin.toml` declares the `save`, `load`, `list` and `gs-install`
+  actions, the two panes the first three open, and the `gs-restore startup` hook.
+- `hs gs-restore` installs, removes and reports the GS session-restore reporter;
+  the feature is default off (see [GS session restore](#gs-session-restore)).
 - `internal/herdrmock` is the offline fake of the herdr surface used by tests.
 - `.github/workflows/release.yml` publishes the release binaries and their
   checksums on a `v*` tag, and `.github/workflows/ci.yml` gates every push.
@@ -293,7 +295,7 @@ forked layout refuses them rather than ignoring them.
 
 ### Inside herdr
 
-`herdr-plugin.toml` declares three actions and the two panes they open, anchored
+`herdr-plugin.toml` declares four actions and the two panes they open, anchored
 to the `hs` binary in the plugin's own `bin/` directory — the layout herdr-bar
 uses for its release binary:
 
@@ -302,6 +304,7 @@ uses for its release binary:
 | `save` | `bin/hs space save --current`, naming the layout after the workspace it runs in |
 | `load` | the `load` pane: `bin/hs space load --select`, picking a stored layout and rebuilding it in a new workspace |
 | `list` | the `layouts` pane: `bin/hs space list --pane`, keeping the table until enter is pressed |
+| `gs-install` | `bin/hs gs-restore install`, installing the GS session-restore reporter (default off) |
 
 Bind them like any plugin action:
 
@@ -324,6 +327,69 @@ expects exactly that path.
 And inside herdr, runtime commands run with the plugin directory as their working
 directory, so project discovery there needs `--dir <path>`; herdr reports no
 project directory to a plugin command, so guessing one would be wrong.
+
+### GS session restore
+
+herdr restores a pane's agent by running the command the reporter reported, and
+the vanilla pi integration reports pi. Inside gentle-shell that brings back
+vanilla pi rather than gentle-shell, so the session loses its launcher. This
+feature ships a reporter that reports `gentle-shell -- --session <path>`, keeps
+re-reporting the session identity every 5 seconds for 2 minutes while herdr
+anchors it, and keeps the pane `working` while live subagents are still running.
+
+**Default off.** Two toggles in
+`$HERDR_PLUGIN_CONFIG_DIR/config.json` (otherwise
+`$XDG_CONFIG_HOME/herdr/plugins/config/herdr-suite/config.json`, then
+`~/.config/herdr/plugins/config/herdr-suite/config.json`) gate it:
+
+```json
+{
+  "gs_restore": {
+    "install": false,
+    "auto_install": false
+  }
+}
+```
+
+`install` is the master gate: with it false the startup hook does nothing at
+all, even when `auto_install` is true. With `install` true, `auto_install`
+chooses the behaviour — true installs the reporter idempotently at server start
+and prints one line only when it changes something; false never writes the agent
+directory and prints one hint per server socket instead. Unknown keys survive a
+rewrite, and a missing or invalid file keeps both toggles off.
+
+The reporter is `extensions/herdr-agent-state.ts` in this repository. It
+installs into the gentle-shell agent directory named by `PI_CODING_AGENT_DIR`,
+and only when that directory exists and holds an `extensions/` directory; a
+vanilla pi installation has no such variable, so the feature simply does not
+apply there.
+
+```bash
+hs gs-restore install          # install or refresh the reporter
+hs gs-restore install --force  # replace a file that is not a herdr reporter
+hs gs-restore remove           # restore the latest backup, or delete the file
+hs gs-restore status           # reporter, version marker, backup, launcher, toggles
+```
+
+An existing herdr pi integration is backed up next to the file before it is
+replaced, as `<name>.bak-<timestamp>`; repeated installs keep that single backup
+instead of collecting more, and `remove` puts the latest backup back. A file
+that is not a herdr reporter is refused with a clear error unless `--force` is
+passed, and even then it is backed up first. The directory has to be created by
+whoever owns the gentle-shell installation: `install` refuses, with the
+`mkdir -p` command to run, instead of inventing a path.
+
+**Single reporter.** Keep exactly one copy of the reporter in the agent
+directory's `extensions/`. Two copies report the same pane twice and race for
+the session identity, which is why install, status and remove all name the one
+file they manage.
+
+**Compatibility.** The reporter is a TypeScript extension for pi. The
+mechanism was verified on Linux with gentle-shell; validating this generic
+reporter on Windows and WSL is still pending, which is why the plugin manifest
+declares only `linux` and `macos`. On vanilla pi the extension reports no
+`resume_argv` and skips the gentle-pi event bus, so it degrades silently rather
+than failing: there is no launcher to detect and nothing user-specific to guess.
 
 ### Layout storage
 
@@ -375,7 +441,7 @@ The herdr binary is found through `HERDR_BIN_PATH`, then `PATH`.
 | --- | --- |
 | `0` | the operation succeeded, or the user declined a confirmation |
 | `1` | herdr failed |
-| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, or a layout name more than one place declares |
+| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, a layout name more than one place declares, or a `PI_CODING_AGENT_DIR` that is unset or is not a gentle-shell agent directory |
 
 Inside herdr, the plugin exposes the same operations as the `save`, `load` and
 `list` actions.
@@ -435,6 +501,8 @@ such interpreter is installed.
 | `internal/herdrcli/` | the herdr client: the CLI calls, the topology snapshot, the layout mutations and the process replacement |
 | `internal/herdrmock/` | the herdr client interface and the offline fake |
 | `internal/layout/` | the layout schema, its storage directory, the snapshot report and the replay plan |
+| `internal/gsrestore/` | the GS session-restore reporter install, config gate and status |
+| `extensions/` | `herdr-agent-state.ts`, the reporter this plugin ships |
 | `herdr-plugin.toml` | the herdr plugin manifest |
 | `.github/workflows/` | `ci.yml`, the checks every push runs, and `release.yml`, the tagged release |
 | `odd/tasks/herdr-suite.md` | the working spec and task log |

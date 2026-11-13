@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/WilberC/herdr-suite/internal/gsrestore"
 	"github.com/WilberC/herdr-suite/internal/herdrcli"
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
 	"github.com/WilberC/herdr-suite/internal/layout"
@@ -21,6 +23,7 @@ Commands:
   attach <name>   Attach to a session; run it outside herdr
   session         Manage herdr sessions
   space           Save and restore herdr spaces
+  gs-restore      Install the GS session-restore reporter (default off)
 
 Run "hs" with no command for the interactive session switcher.
 Run "hs <command> --help" for command details.
@@ -69,23 +72,31 @@ var commands = []command{
 		summary: "Save and restore herdr spaces",
 		usage:   spaceUsage,
 	},
+	{
+		name:    "gs-restore",
+		summary: "Install the GS session-restore reporter",
+		usage:   gsRestoreUsage,
+	},
 }
 
 type deps struct {
-	client      herdrmock.SessionClient
-	spaces      herdrmock.SpaceClient
-	writer      herdrmock.Writer
-	exec        session.Execer
-	getenv      func(string) string
-	cwd         func() (string, error)
-	in          io.Reader
-	interactive bool
-	confirm     session.Confirmer
-	switcher    func(context.Context) (string, error)
-	pick        func([]herdrmock.Workspace) (string, error)
-	pickLayout  func([]layout.Entry) (string, error)
-	out         io.Writer
-	err         io.Writer
+	client         herdrmock.SessionClient
+	spaces         herdrmock.SpaceClient
+	writer         herdrmock.Writer
+	exec           session.Execer
+	getenv         func(string) string
+	cwd            func() (string, error)
+	in             io.Reader
+	interactive    bool
+	confirm        session.Confirmer
+	switcher       func(context.Context) (string, error)
+	pick           func([]herdrmock.Workspace) (string, error)
+	pickLayout     func([]layout.Entry) (string, error)
+	reporterSource func() (string, error)
+	now            func() time.Time
+	lookPath       func(string) (string, error)
+	out            io.Writer
+	err            io.Writer
 }
 
 func main() {
@@ -99,16 +110,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 func defaultDeps(stdout, stderr io.Writer) deps {
 	herdr := herdrcli.New()
 	d := deps{
-		client:      herdr,
-		spaces:      herdr,
-		writer:      herdr,
-		exec:        herdrcli.Execer{},
-		getenv:      os.Getenv,
-		cwd:         os.Getwd,
-		in:          os.Stdin,
-		interactive: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
-		out:         stdout,
-		err:         stderr,
+		client:         herdr,
+		spaces:         herdr,
+		writer:         herdr,
+		exec:           herdrcli.Execer{},
+		getenv:         os.Getenv,
+		cwd:            os.Getwd,
+		in:             os.Stdin,
+		interactive:    isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
+		reporterSource: defaultReporterSource,
+		now:            defaultNow,
+		lookPath:       defaultLookPath,
+		out:            stdout,
+		err:            stderr,
 	}
 	if d.interactive {
 		d.confirm = session.TerminalConfirmer(os.Stdin, stderr)
@@ -194,6 +208,8 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 		return runSession(d, args[1:])
 	case "space":
 		return runSpace(d, args[1:])
+	case "gs-restore":
+		return runGSRestore(d, args[1:])
 	}
 
 	return unknownCommand(cmd.name, stderr)
@@ -363,6 +379,11 @@ func report(err error, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "hs: %s\n", refusal.Reason)
 		return 2
 	}
+	var gsRefusal gsrestore.Refusal
+	if errors.As(err, &gsRefusal) {
+		fmt.Fprintf(stderr, "hs: %s\n", gsRefusal.Reason)
+		return 2
+	}
 	var stored layout.ExistsError
 	if errors.As(err, &stored) {
 		fmt.Fprintf(stderr, "hs: %v\n", err)
@@ -383,6 +404,12 @@ var groupUsage = map[string]map[string]string{
 	},
 	"session": {
 		"fork": sessionForkUsage,
+	},
+	"gs-restore": {
+		"install": gsRestoreInstallUsage,
+		"remove":  gsRestoreRemoveUsage,
+		"status":  gsRestoreStatusUsage,
+		"startup": gsRestoreStartupUsage,
 	},
 }
 

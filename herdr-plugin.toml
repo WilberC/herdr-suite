@@ -12,13 +12,27 @@ build = [
   { command = ["bash", "bin/ensure-binary.sh", "--in-tree"] }
 ]
 
-startup = []
 events = []
+
+# GS session restore is default off. The startup hook reads the plugin config
+# (gs_restore.install is the master gate, gs_restore.auto_install chooses install
+# or a one-line hint) and does nothing until the user opts in. The reporter
+# itself installs into the gentle-shell agent directory named by
+# PI_CODING_AGENT_DIR, so a vanilla pi installation is untouched.
+[[startup]]
+command = ["bin/hs", "gs-restore", "startup"]
 
 # The [[build]] hook provisions bin/hs on every install and update: it builds
 # with a local Go toolchain and falls back to the prebuilt hs-<os>-<arch>
 # release binary verified against the tag (the herdr-agent-usage pattern).
 # `herdr plugin link` runs no build, so a working tree uses "make hs".
+[[actions]]
+id = "gs-install"
+title = "Install GS session restore"
+description = "Install the gentle-shell session reporter into the gentle-shell agent directory (default off)"
+contexts = ["global"]
+command = ["bin/hs", "gs-restore", "install"]
+
 [[actions]]
 id = "save"
 title = "Save space"
