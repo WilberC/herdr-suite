@@ -1,6 +1,6 @@
 id = "herdr-suite"
 name = "Herdr Suite"
-version = "0.1.0"
+version = "0.2.0"
 # `herdr api snapshot` first shipped in herdr 0.7.2 (src/cli/api.rs gained the
 # snapshot subcommand with the session.snapshot socket method). Plugin actions
 # and panes arrived in 0.7.0, so 0.7.5 covers everything this plugin uses.
