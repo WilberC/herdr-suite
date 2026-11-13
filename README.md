@@ -30,21 +30,22 @@ switcher and a scriptable CLI that doubles as herdr plugin actions.
 ## Quick start
 
 ```bash
-herdr plugin install WilberC/herdr-suite  # fetch the plugin; its build hook puts bin/hs in place
-hs path install                           # so `hs` works from your shell
-hs version                                # the binary runs and names the release it was built as
-hs doctor                                 # herdr, socket, config, binary and layout store in one pass
-hs gs-restore install                     # optional: gentle-shell sessions come back through its launcher, then /reload in pi
-hs space save work                        # snapshot the active workspace as the layout "work"
-hs space load work                        # recreate that layout in the active workspace
+herdr plugin install WilberC/herdr-suite   # fetch the plugin; its build hook provisions bin/hs
+herdr plugin action invoke herdr-suite.hs-path   # put `hs` on PATH — also prefix+p → the action, inside herdr
+hs version                                 # the binary runs and names the release it was built as
+hs doctor                                  # herdr, socket, config, binary and layout store in one pass
+hs gs-restore install                      # optional: gentle-shell sessions come back through its launcher, then /reload in pi
+hs space save work                         # snapshot the active workspace as the layout "work"
+hs space load work                         # recreate that layout in the active workspace
 ```
 
-The first run needs the binary the plugin root holds: `bin/hs path install` (or the
-"Install hs on PATH" plugin action) writes an `hs` shim into `~/.local/bin` that
-resolves the plugin root every time it runs, so `hs` keeps working after a plugin
-update. Each step has its own section — [Install](docs/install.md), [Version and
-doctor](docs/health.md), [GS session restore](docs/gs-restore.md) and
-[Spaces](docs/spaces.md) — and [Shell
+`hs` is not on PATH the instant the plugin installs — that is what the second
+line fixes: the action runs the plugin's own binary from its root and writes a
+small `hs` shim into `~/.local/bin` that resolves the plugin root every time it
+runs, so `hs` keeps working after a plugin update. Press `prefix+p` instead if
+you prefer doing it from the plugin manager popup. Each step has its own section
+— [Install](docs/install.md), [Version and doctor](docs/health.md), [GS session
+restore](docs/gs-restore.md) and [Spaces](docs/spaces.md) — and [Shell
 completions](docs/install.md#shell-completions) covers the fish script.
 
 Every behavior above is covered by offline tests (the herdr surface is a fake
