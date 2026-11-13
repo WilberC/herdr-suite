@@ -21,11 +21,9 @@ switcher and a scriptable CLI that doubles as herdr plugin actions.
   so herdr relaunches your sessions through the `gentle-shell` launcher instead
   of vanilla pi.
 
-<p align="center">
-  <img src="docs/media/doctor.svg" width="680" alt="hs doctor output">
-  <br>
-  <img src="docs/media/layouts.svg" width="680" alt="hs space save · show · load">
-</p>
+| health check · `hs doctor` | spaces · `hs space` |
+| --- | --- |
+| <img src="docs/media/doctor.svg" width="412" alt="hs doctor output"> | <img src="docs/media/layouts.svg" width="412" alt="hs space save · show · load"> |
 
 ## Quick start
 
