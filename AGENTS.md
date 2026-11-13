@@ -82,6 +82,7 @@ make hs                                    # build bin/hs (dev binary)
 | Session switching and `hs session` | [`docs/sessions.md`](docs/sessions.md) |
 | Layouts: save, load, show, list, forks, storage | [`docs/spaces.md`](docs/spaces.md) |
 | The GS session-restore reporter | [`docs/gs-restore.md`](docs/gs-restore.md) |
+| The `hs last` focus-history toggles and their state file | [`docs/last.md`](docs/last.md) |
 | Plugin actions, panes, inside-herdr keys | [`docs/inside-herdr.md`](docs/inside-herdr.md) |
 | `hs version`, `hs doctor`, exit codes | [`docs/health.md`](docs/health.md) |
 | Tests, workflows, release flow, repo layout | [`docs/development.md`](docs/development.md) |
