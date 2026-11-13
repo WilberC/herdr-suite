@@ -6,6 +6,11 @@
 # GOARCH values the matrix builds. cmd/hs/release_workflow_test.go asserts this
 # matrix and the platforms in herdr-plugin.toml agree, so a target added here
 # without a matching platform fails the test suite.
+#
+# The build stamps the tag into the binary as -X main.version, so a published
+# binary reports its own release: `hs version` prints it, `hs version --check`
+# compares it with the manifest, and `hs doctor` reports a binary built before
+# the manifest moved. A local build keeps the dev default.
 name: release
 
 on:
@@ -57,7 +62,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          go build -trimpath -o "dist/hs-${GOOS}-${GOARCH}" ./cmd/hs
+          go build -trimpath -ldflags "-X main.version=${GITHUB_REF_NAME#v}" -o "dist/hs-${GOOS}-${GOARCH}" ./cmd/hs
       - uses: actions/upload-artifact@v4
         with:
           name: hs-${{ matrix.os }}-${{ matrix.arch }}

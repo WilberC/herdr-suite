@@ -24,6 +24,9 @@ session forks and the plugin actions are implemented.
 - `hs space load` recreates a stored layout, in a workspace or as every
   workspace a fork captured.
 - `hs space list` lists the layouts visible from the current directory.
+- `hs version` reports the build version, and `hs version --check` compares it
+  with the manifest so a stale binary is caught; `hs doctor` reports the whole
+  installation one line at a time.
 - `herdr-plugin.toml` declares the `save`, `load`, `list` and `gs-install`
   actions, the two panes the first three open, and the `gs-restore startup` hook.
 - `hs gs-restore` installs, removes and reports the GS session-restore reporter;
@@ -96,6 +99,11 @@ hs space list                   # NAME, SCOPE, WORKSPACE, TABS, PANES, MODIFIED
 hs space list --json            # {"layouts":[{"name","scope","workspace",...}]}
 hs space list --pane            # keep the table on screen until enter
 hs space list --dir ~/project   # discover from that directory instead
+hs version                      # hs version 0.2.0, or hs version dev in a tree
+hs version --json               # {"version":"0.2.0"}
+hs version --check              # exit 1 when the binary is older than the manifest
+hs doctor                       # PASS/WARN/FAIL/SKIP lines; exit 1 on a FAIL
+hs doctor --json                # the whole report as one JSON document
 ```
 
 Session names are sanitized before they reach herdr: whitespace runs become
@@ -400,6 +408,14 @@ session rules: whitespace runs become one `-`, and only letters, digits, `.`,
 `_` and `-` are kept. Saving refuses to replace a stored layout unless `--force`
 is passed.
 
+Every saved layout names its schema at the top level, `"schema_version": 1`. A
+file written before the field existed (v0.1.0 wrote single-workspace files
+without it) reads as version 1, so a stored layout keeps working across an
+upgrade; a version above 1 was written by a newer `hs` and is refused with the
+fix rather than read, because this build cannot know what the extra fields mean.
+Reading never rewrites a file, so loading an older layout leaves it byte-for-byte
+as it was.
+
 Layouts are JSON, not TOML: Go's standard library ships a JSON encoder and
 decoder, while TOML would need a third-party dependency, and the schema is a
 nested split tree, which JSON represents directly. One format also means the
@@ -435,13 +451,64 @@ access layer that space snapshots use. A session that cannot be read shows
 
 The herdr binary is found through `HERDR_BIN_PATH`, then `PATH`.
 
+### Version and doctor
+
+A published binary knows its own release: the release workflow stamps the tag
+into it with `-ldflags "-X main.version=<tag>"`, so `hs version` reports the tag
+it was built from. A build from a working tree embeds nothing and keeps the `dev`
+default — `make hs` passes no ldflags on purpose.
+
+```bash
+hs version            # hs version 0.2.0
+hs version --json     # {"version":"0.2.0"}
+hs version --check    # hs version 0.2.0 · manifest 0.2.0 · ok
+```
+
+`hs version --check` reads the manifest beside the binary — the plugin root above
+`bin/hs`, then the working directory; `--manifest <path>` overrides both — and
+exits 0 when the two versions match, 1 when the binary is stale, naming both
+values and the fix. A dev build has no release version to compare, so it reports
+`dev build; no release version embedded` and always exits 0: a working tree is
+never failed by its own build. This is the check a script runs after installing
+or updating the plugin.
+
+`hs doctor` reports the installation one line per check, and writes nothing:
+
+```text
+PASS  herdr                herdr 0.9.5 at /usr/local/bin/herdr (min_herdr_version 0.7.5)
+PASS  socket               reachable · 3 sessions
+PASS  config               ~/.config/herdr/plugins/config/herdr-suite/config.json (missing) · gs_restore install off, auto_install off
+PASS  binary               0.2.0 matches herdr-plugin.toml
+PASS  layouts              ~/.config/herdr/herdr-suite/layouts · 2 layouts
+PASS  project              project /home/wilber/dotfiles · 1 layout
+SKIP  gs-restore reporter  not installed (feature default off)
+SKIP  gs-restore version   no reporter installed
+PASS  gs-restore backup    none
+SKIP  gs-restore launcher  not checked; no reporter installed
+PASS  manifest             ~/.local/share/herdr/plugins/herdr-suite/herdr-plugin.toml · Herd Suite 0.2.0 (min_herdr_version 0.7.5)
+```
+
+Every line prints `PASS`, `WARN`, `FAIL` or `SKIP`, and a failing line names the
+fix in one clause — `stale binary: embedded 0.1.0, manifest 0.2.0; run make hs or
+reinstall the plugin`. The exit status is 0 when nothing failed and 1 when a line
+failed, so a warning keeps a script green. `--json` prints the whole report —
+the build version, `ok` and every check with its id, status and detail — as one
+document.
+
+The lines cover: the herdr binary and its version against `min_herdr_version`,
+the socket (a session list bounded by a three-second timeout, so a hung socket is
+a `FAIL` line and never a hanging report), the plugin config and its `gs_restore`
+toggles, this binary against the manifest version, the layout store and what the
+current directory declares (counts only, never a layout's contents), the GS
+session-restore files, and the plugin manifest itself.
+
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | the operation succeeded, or the user declined a confirmation |
-| `1` | herdr failed |
-| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, a layout name more than one place declares, or a `PI_CODING_AGENT_DIR` that is unset or is not a gentle-shell agent directory |
+| `0` | the operation succeeded, the user declined a confirmation, `hs version --check` found a matching version, or `hs doctor` reported no failure |
+| `1` | herdr failed, `hs version --check` found a stale binary, or `hs doctor` reported a `FAIL` line |
+| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, a layout name more than one place declares, a layout written by a newer `hs`, or a `PI_CODING_AGENT_DIR` that is unset or is not a gentle-shell agent directory |
 
 Inside herdr, the plugin exposes the same operations as the `save`, `load` and
 `list` actions.
@@ -470,9 +537,12 @@ go build ./... && go vet ./... && test -z "$(gofmt -l cmd internal)" && go test 
 
 `.github/workflows/release.yml` repeats the checks once more on a `v*` tag, then
 cross-compiles the four targets with `CGO_ENABLED=0`, writes `SHA256SUMS` with
-`sha256sum`, and creates the GitHub release with `gh`. Both workflows read the
-toolchain from `go-version-file: go.mod`, so the version lives in one place, and
-neither needs a release tool: the pipeline is `go`, `sha256sum` and `gh` only.
+`sha256sum`, and creates the GitHub release with `gh`. Each binary is built with
+`-ldflags "-X main.version=<tag>"`, so it self-reports its release; a local build
+keeps `dev`, which is why `hs version --check` can tell a stale binary from the
+manifest it sits beside. Both workflows read the toolchain from
+`go-version-file: go.mod`, so the version lives in one place, and neither needs a
+release tool: the pipeline is `go`, `sha256sum` and `gh` only.
 
 The matrix stops at linux and darwin, the two platforms `herdr-plugin.toml`
 declares. A Windows binary is deliberately not shipped: `syscall.Exec` returns
@@ -502,6 +572,8 @@ such interpreter is installed.
 | `internal/herdrmock/` | the herdr client interface and the offline fake |
 | `internal/layout/` | the layout schema, its storage directory, the snapshot report and the replay plan |
 | `internal/gsrestore/` | the GS session-restore reporter install, config gate and status |
+| `internal/manifest/` | the plugin manifest fields the binary reports: the version and the herdr floor |
+| `internal/doctor/` | the read-only installation report behind `hs doctor` |
 | `extensions/` | `herdr-agent-state.ts`, the reporter this plugin ships |
 | `herdr-plugin.toml` | the herdr plugin manifest |
 | `.github/workflows/` | `ci.yml`, the checks every push runs, and `release.yml`, the tagged release |

@@ -24,6 +24,8 @@ Commands:
   session         Manage herdr sessions
   space           Save and restore herdr spaces
   gs-restore      Install the GS session-restore reporter (default off)
+  doctor          Report the health of this installation
+  version         Print the version this binary was built as
 
 Run "hs" with no command for the interactive session switcher.
 Run "hs <command> --help" for command details.
@@ -77,6 +79,16 @@ var commands = []command{
 		summary: "Install the GS session-restore reporter",
 		usage:   gsRestoreUsage,
 	},
+	{
+		name:    "doctor",
+		summary: "Report the health of this installation",
+		usage:   doctorUsage,
+	},
+	{
+		name:    "version",
+		summary: "Print the build version",
+		usage:   versionUsage,
+	},
 }
 
 type deps struct {
@@ -97,6 +109,18 @@ type deps struct {
 	lookPath       func(string) (string, error)
 	out            io.Writer
 	err            io.Writer
+
+	// version is the build version the binary reports. It is a field so a test
+	// can pin an embedded release version; a build without one keeps the dev
+	// default.
+	version string
+	// executable is where this binary runs from, which anchors the plugin
+	// manifest the version check and the doctor read.
+	executable func() (string, error)
+	// herdrRun runs the herdr binary for the doctor's version probe.
+	herdrRun func(ctx context.Context, bin string, args ...string) (stdout, stderr []byte, err error)
+	// socketTimeout bounds every herdr probe the doctor makes.
+	socketTimeout time.Duration
 }
 
 func main() {
@@ -121,6 +145,10 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 		reporterSource: defaultReporterSource,
 		now:            defaultNow,
 		lookPath:       defaultLookPath,
+		version:        version,
+		executable:     os.Executable,
+		herdrRun:       defaultHerdrRun,
+		socketTimeout:  defaultSocketTimeout,
 		out:            stdout,
 		err:            stderr,
 	}
@@ -210,6 +238,10 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 		return runSpace(d, args[1:])
 	case "gs-restore":
 		return runGSRestore(d, args[1:])
+	case "doctor":
+		return runDoctor(d, args[1:])
+	case "version":
+		return runVersion(d, args[1:])
 	}
 
 	return unknownCommand(cmd.name, stderr)
@@ -386,6 +418,11 @@ func report(err error, stderr io.Writer) int {
 	}
 	var stored layout.ExistsError
 	if errors.As(err, &stored) {
+		fmt.Fprintf(stderr, "hs: %v\n", err)
+		return 2
+	}
+	var newer layout.UnsupportedSchemaError
+	if errors.As(err, &newer) {
 		fmt.Fprintf(stderr, "hs: %v\n", err)
 		return 2
 	}

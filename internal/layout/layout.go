@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
@@ -16,29 +17,45 @@ const (
 	TypeSplit = "split"
 )
 
+// CurrentSchema is the layout schema version this build writes. It is stored as
+// the top-level schema_version of every saved document, so a later build can
+// tell which shape it is reading.
+const CurrentSchema = 1
+
 // Layout is one stored space. The single-workspace form holds the workspace that
 // was active when it was snapshotted; the session form holds every workspace of
-// the session a fork captured.
+// the session a fork captured. SchemaVersion is the version the document was
+// read at, which is CurrentSchema for a freshly captured layout and for a file
+// written before the field existed.
 type Layout struct {
-	Name       string
-	Session    string
-	Workspace  Workspace
-	Workspaces []Workspace
+	Name          string
+	Session       string
+	SchemaVersion int
+	Workspace     Workspace
+	Workspaces    []Workspace
 }
 
 // storedDocument is the file form of a layout: exactly one of the two shapes is
 // present, so a single-workspace file keeps the shape earlier versions wrote and
-// a session file carries a workspace list instead.
+// a session file carries a workspace list instead. SchemaVersion is read as raw
+// JSON so a value that is not an integer is refused with a message of our own
+// instead of a decoder error about a Go type.
 type storedDocument struct {
-	Name       string      `json:"name"`
-	Session    string      `json:"session,omitempty"`
-	Workspace  *Workspace  `json:"workspace,omitempty"`
-	Workspaces []Workspace `json:"workspaces,omitempty"`
+	SchemaVersion json.RawMessage `json:"schema_version,omitempty"`
+	Name          string          `json:"name"`
+	Session       string          `json:"session,omitempty"`
+	Workspace     *Workspace      `json:"workspace,omitempty"`
+	Workspaces    []Workspace     `json:"workspaces,omitempty"`
 }
 
-// MarshalJSON encodes the form the layout holds.
+// MarshalJSON encodes the form the layout holds with the schema version this
+// build writes.
 func (l Layout) MarshalJSON() ([]byte, error) {
-	document := storedDocument{Name: l.Name, Session: l.Session}
+	document := storedDocument{
+		SchemaVersion: json.RawMessage(strconv.Itoa(CurrentSchema)),
+		Name:          l.Name,
+		Session:       l.Session,
+	}
 	if len(l.Workspaces) > 0 {
 		document.Workspaces = l.Workspaces
 	} else {
@@ -48,11 +65,16 @@ func (l Layout) MarshalJSON() ([]byte, error) {
 	return json.Marshal(document)
 }
 
-// UnmarshalJSON reads either form and refuses a document that carries both or
+// UnmarshalJSON reads either form and refuses a document this build cannot
+// read: a newer schema first, then a document that carries both shapes or
 // neither.
 func (l *Layout) UnmarshalJSON(data []byte) error {
 	var document storedDocument
 	if err := json.Unmarshal(data, &document); err != nil {
+		return err
+	}
+	schemaVersion, err := readSchemaVersion(document.SchemaVersion)
+	if err != nil {
 		return err
 	}
 	if document.Workspace != nil && len(document.Workspaces) > 0 {
@@ -64,12 +86,45 @@ func (l *Layout) UnmarshalJSON(data []byte) error {
 
 	l.Name = document.Name
 	l.Session = document.Session
+	l.SchemaVersion = schemaVersion
 	l.Workspace = Workspace{}
 	l.Workspaces = document.Workspaces
 	if document.Workspace != nil {
 		l.Workspace = *document.Workspace
 	}
 	return nil
+}
+
+// readSchemaVersion reads the document's schema version. A document that names
+// none predates versioning (v0.1.0 wrote single-workspace files without it) and
+// is read as CurrentSchema; a version this build cannot read is refused instead
+// of guessed at.
+func readSchemaVersion(raw json.RawMessage) (int, error) {
+	if len(raw) == 0 {
+		return CurrentSchema, nil
+	}
+	version, err := strconv.Atoi(string(raw))
+	if err != nil {
+		return 0, fmt.Errorf("layout schema_version %s is not an integer", raw)
+	}
+	if version < 1 {
+		return 0, fmt.Errorf("layout schema_version %d is invalid; it must be a positive integer", version)
+	}
+	if version > CurrentSchema {
+		return 0, UnsupportedSchemaError{Version: version}
+	}
+	return version, nil
+}
+
+// UnsupportedSchemaError reports a document a newer herdr-suite wrote: this
+// build does not know every field it holds, so it refuses the document instead
+// of reading the part it understands.
+type UnsupportedSchemaError struct {
+	Version int
+}
+
+func (e UnsupportedSchemaError) Error() string {
+	return fmt.Sprintf("layout schema_version %d was written by a newer herdr-suite; update hs", e.Version)
 }
 
 // Multi reports whether the layout holds a session: every workspace of one
@@ -130,7 +185,7 @@ func Capture(name string, space herdrmock.Space, workspace herdrmock.Workspace) 
 	if err != nil {
 		return Layout{}, err
 	}
-	return Layout{Name: name, Session: space.Session, Workspace: captured}, nil
+	return Layout{Name: name, Session: space.Session, SchemaVersion: CurrentSchema, Workspace: captured}, nil
 }
 
 // captureWorkspace turns one live workspace into the stored workspace.
@@ -166,9 +221,10 @@ func CaptureSession(name string, space herdrmock.Space) (Layout, error) {
 	}
 
 	document := Layout{
-		Name:       name,
-		Session:    space.Session,
-		Workspaces: make([]Workspace, 0, len(space.Workspaces)),
+		Name:          name,
+		Session:       space.Session,
+		SchemaVersion: CurrentSchema,
+		Workspaces:    make([]Workspace, 0, len(space.Workspaces)),
 	}
 	for _, workspace := range space.Workspaces {
 		captured, err := captureWorkspace(workspace)

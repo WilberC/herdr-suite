@@ -17,8 +17,8 @@
 // workspace of that session. A workspace holds tabs, and a tab holds a split
 // tree:
 //
-//	Layout  { name, session?, workspace }            single-workspace form
-//	Layout  { name, session?, workspaces[] }         session form
+//	Layout  { schema_version: 1, name, session?, workspace }            single-workspace form
+//	Layout  { schema_version: 1, name, session?, workspaces[] }         session form
 //	Workspace { label, tabs[] }
 //	Tab     { label?, focused, focused_pane_id?, root }
 //	Node    { type: "pane" }  pane_id?, label?, cwd?, agent?
@@ -29,6 +29,23 @@
 // that was active when it was saved or the workspace list a fork captured, so a
 // file written before the session form existed still reads and re-encodes
 // unchanged.
+//
+// # Schema version
+//
+// Every saved document names its schema at the top level, and CurrentSchema is
+// the only version this build writes. A document that carries no schema_version
+// predates the field — v0.1.0 wrote single-workspace files without it — and is
+// read as CurrentSchema, so a stored layout keeps working across an upgrade.
+// A document that names a version this build cannot read, or a value that is not
+// an integer, is refused instead of read: the fields this build knows may not be
+// all the file holds, and silently dropping the rest would lose a layout. The
+// refusal names the file, the version and the fix ("written by a newer
+// herdr-suite; update hs").
+//
+// Reading never rewrites a document, so a load-only flow leaves an older file
+// byte-for-byte as it was; the next save writes the field, and that field is the
+// only difference a saved legacy document gains. Saving a document this build
+// read and saving it again therefore produces identical bytes.
 //
 // A split is binary and ordered: first is the left or top child of a "right" or
 // "down" split, exactly as herdr reports it, and ratio is the share first takes.

@@ -39,8 +39,9 @@ func sessionSpace() herdrmock.Space {
 
 func sessionLayout() Layout {
 	return Layout{
-		Name:    "session",
-		Session: "work",
+		Name:          "session",
+		Session:       "work",
+		SchemaVersion: CurrentSchema,
 		Workspaces: []Workspace{
 			wantLayout().Workspace,
 			{

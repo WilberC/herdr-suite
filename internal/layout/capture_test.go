@@ -67,8 +67,9 @@ func spaceFixture() herdrmock.Space {
 
 func wantLayout() Layout {
 	return Layout{
-		Name:    "work",
-		Session: "work",
+		Name:          "work",
+		Session:       "work",
+		SchemaVersion: CurrentSchema,
 		Workspace: Workspace{
 			Label: "project",
 			Tabs: []Tab{

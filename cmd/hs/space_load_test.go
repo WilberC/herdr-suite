@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -561,4 +562,35 @@ func nodeShape(node layout.Node) string {
 		return "(" + strings.Join(parts, " ") + ")"
 	}
 	return fmt.Sprintf("split %s %.2f %s %s", node.Direction, node.Ratio, nodeShape(*node.First), nodeShape(*node.Second))
+}
+
+// TestSpaceLoadRefusesALayoutANewerBuildWrote pins the exit status of a stored
+// layout this build cannot read: it is a refusal, so nothing is replayed and the
+// message says which release to install.
+func TestSpaceLoadRefusesALayoutANewerBuildWrote(t *testing.T) {
+	run := newLoadRun(t)
+	path := run.layoutPath("future")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "{\n  \"schema_version\": 2,\n  \"name\": \"future\",\n  \"workspace\": {\"label\": \"project\", \"tabs\": []}\n}\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code := run.run(t, "space", "load", "future")
+
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2\nstdout:\n%s\nstderr:\n%s", code, run.stdout, run.stderr)
+	}
+	for _, want := range []string{"newer herdr-suite", "update hs", path} {
+		if !strings.Contains(run.stderr.String(), want) {
+			t.Errorf("stderr does not contain %q; got:\n%s", want, run.stderr)
+		}
+	}
+	for _, call := range run.client.Calls() {
+		if call.Method != "ListSessions" && call.Method != "Snapshot" {
+			t.Errorf("a refused load performed %v, want no replay", call)
+		}
+	}
 }

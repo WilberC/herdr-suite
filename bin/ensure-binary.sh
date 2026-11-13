@@ -89,8 +89,18 @@ download_release_binary() {
   fi
 
   chmod +x "$tmp"
-  # Sanity check before installing: the binary must run on this machine.
-  "$tmp" --help >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+  # Sanity check before installing: the binary must run on this machine, and it
+  # must answer "version". Both success shapes are accepted — "hs version
+  # <release>" and "hs version dev" — because the check verifies that the asset
+  # runs, not which release it is; an asset for another platform, a truncated
+  # download or an unrelated file exits non-zero or prints something else, and
+  # nothing is installed in that case.
+  local sanity
+  sanity="$("$tmp" version 2>/dev/null)" || { rm -f "$tmp"; return 1; }
+  case "$sanity" in
+    "hs version "*) ;;
+    *) rm -f "$tmp"; return 1 ;;
+  esac
   mv -f "$tmp" "$dest"
 }
 
