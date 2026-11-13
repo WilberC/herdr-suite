@@ -39,6 +39,40 @@ A published binary self-reports its release, and `hs version --check` compares
 it against the manifest beside it — that is the check to run after installing or
 updating. See [Health](health.md).
 
+## PATH
+
+`bin/hs` lives inside the plugin checkout, whose path carries a hash and a
+generation number, so pointing a shell profile at it breaks at the first plugin
+update. `hs path install` writes a small `sh` shim instead — `hs` in
+`$HOME/.local/bin` by default, or in `--dir <path>` — that resolves the plugin
+root when it runs:
+
+```bash
+bin/hs path install    # run once from the plugin root; afterwards plain `hs` works
+hs path status         # installed? still our script? on PATH? plugin resolvable?
+hs path remove         # delete the shim again
+```
+
+The shim is fifteen lines and asks nothing of the machine beyond `sh`, `grep`,
+`head` and `sed`: it reads `plugin_root` out of `herdr plugin list --plugin
+herdr-suite --json`, checks that `<root>/bin/hs` is executable, and `exec`s it
+with the arguments it was given. It never stores the checkout path, so a plugin
+update, a new generation directory or a moved config all leave it working; a
+plugin that is not installed makes it exit 1 with the `herdr plugin install`
+command that fixes it. The global "Install hs on PATH" plugin action runs the
+same install — see [Inside herdr](inside-herdr.md) — and nothing is ever
+installed behind your back.
+
+Install reports the file it wrote and whether its directory is in `PATH`; when
+it is not, the report carries the line to copy —
+`export PATH="$HOME/.local/bin:$PATH"` — because a shim a shell never searches
+is not an `hs` command. Two options change what the commands do: `--dir <path>`
+chooses the directory, and `--force` replaces an existing `hs` this tool did not
+write, after copying it to `<name>.bak-<timestamp>`. An `hs` that is already the
+current shim is a no-op, and a removal that finds nothing exits 0. With `HOME`
+unset every one of the three commands refuses and names `--dir` rather than
+guessing a home directory.
+
 ## Shell completions
 
 `hs completions fish` prints a fish completion script. It completes the command

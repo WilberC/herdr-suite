@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"time"
-)
 
-// timestampLayout names a backup: deterministic, sortable and free of colons.
-const timestampLayout = "20060102T150405"
+	"github.com/WilberC/herdr-suite/internal/backup"
+)
 
 // InstallResult is what an install did, so the caller can report it or stay
 // silent.
@@ -40,17 +37,17 @@ func Install(target Target, reporter []byte, force bool, now time.Time) (Install
 			return InstallResult{}, Refusal{Reason: fmt.Sprintf(
 				"%s already exists and is not a herdr agent reporter; pass --force to replace it and keep a backup", target.Path)}
 		}
-		backup := LatestBackup(target.Path)
-		if backup == "" {
-			backup = target.Path + ".bak-" + now.UTC().Format(timestampLayout)
+		backupPath := LatestBackup(target.Path)
+		if backupPath == "" {
+			backupPath = backup.Path(target.Path, now)
 		}
-		if err := os.WriteFile(backup, existing, 0o644); err != nil {
+		if err := os.WriteFile(backupPath, existing, 0o644); err != nil {
 			return InstallResult{}, fmt.Errorf("back up %s: %w", target.Path, err)
 		}
 		if err := os.WriteFile(target.Path, reporter, 0o644); err != nil {
 			return InstallResult{}, fmt.Errorf("write %s: %w", target.Path, err)
 		}
-		return InstallResult{Path: target.Path, Backup: backup, Wrote: true}, nil
+		return InstallResult{Path: target.Path, Backup: backupPath, Wrote: true}, nil
 	case os.IsNotExist(err):
 		if err := os.WriteFile(target.Path, reporter, 0o644); err != nil {
 			return InstallResult{}, fmt.Errorf("write %s: %w", target.Path, err)
@@ -99,10 +96,5 @@ func Remove(target Target) (RemoveResult, error) {
 // LatestBackup is the backup Remove restores and Install overwrites: the
 // greatest name, which the timestamp suffix makes the most recent.
 func LatestBackup(path string) string {
-	matches, err := filepath.Glob(path + ".bak-*")
-	if err != nil || len(matches) == 0 {
-		return ""
-	}
-	sort.Strings(matches)
-	return matches[len(matches)-1]
+	return backup.Latest(path)
 }

@@ -70,6 +70,8 @@ such interpreter is installed.
 | `internal/gsrestore/` | the GS session-restore reporter install, config gate and status |
 | `internal/manifest/` | the plugin manifest fields the binary reports: the version and the herdr floor |
 | `internal/doctor/` | the read-only installation report behind `hs doctor` |
+| `internal/pathshim/` | the update-safe `hs` PATH shim: the frozen script, its plugin-root reader, and install/remove/status |
+| `internal/backup/` | the `<name>.bak-<timestamp>` copy an install keeps when it replaces a file |
 | `extensions/` | `herdr-agent-state.ts`, the reporter this plugin ships |
 | `herdr-plugin.toml` | the herdr plugin manifest |
 | `.github/workflows/` | `ci.yml`, the checks every push runs, and `release.yml`, the tagged release |

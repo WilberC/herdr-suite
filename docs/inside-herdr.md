@@ -4,7 +4,7 @@ Back to the [README](../README.md). The commands these actions run are in
 [Spaces](spaces.md), the install path in [Install](install.md), and the reporter
 toggle in [GS session restore](gs-restore.md).
 
-`herdr-plugin.toml` declares four actions and the two panes they open, anchored
+`herdr-plugin.toml` declares five actions and the two panes they open, anchored
 to the `hs` binary in the plugin's own `bin/` directory — the layout herdr-bar
 uses for its release binary:
 
@@ -14,6 +14,7 @@ uses for its release binary:
 | `load` | the `load` pane: `bin/hs space load --select`, picking a stored layout and rebuilding it in a new workspace |
 | `list` | the `layouts` pane: `bin/hs space list --pane`, keeping the table until enter is pressed |
 | `gs-install` | `bin/hs gs-restore install`, installing the GS session-restore reporter (default off) |
+| `hs-path` | `bin/hs path install`, writing the `hs` shim into `~/.local/bin` so `hs` works from a shell ([Install § PATH](install.md#path)) |
 
 Bind them like any plugin action:
 

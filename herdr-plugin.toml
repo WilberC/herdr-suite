@@ -34,6 +34,13 @@ contexts = ["global"]
 command = ["bin/hs", "gs-restore", "install"]
 
 [[actions]]
+id = "hs-path"
+title = "Install hs on PATH"
+description = "Write an update-safe shim into ~/.local/bin so hs works from your shell; then run hs path status"
+contexts = ["global"]
+command = ["bin/hs", "path", "install"]
+
+[[actions]]
 id = "save"
 title = "Save space"
 description = "Snapshot the current workspace as a layout named after it"

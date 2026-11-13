@@ -31,6 +31,7 @@ switcher and a scriptable CLI that doubles as herdr plugin actions.
 
 ```bash
 herdr plugin install WilberC/herdr-suite  # fetch the plugin; its build hook puts bin/hs in place
+hs path install                           # so `hs` works from your shell
 hs version                                # the binary runs and names the release it was built as
 hs doctor                                 # herdr, socket, config, binary and layout store in one pass
 hs gs-restore install                     # optional: gentle-shell sessions come back through its launcher, then /reload in pi
@@ -38,10 +39,12 @@ hs space save work                        # snapshot the active workspace as the
 hs space load work                        # recreate that layout in the active workspace
 ```
 
-`bin/hs` sits in the plugin root: put it on `PATH`, or run it from there, before
-the `hs` lines. Each step has its own section — [Install](docs/install.md),
-[Version and doctor](docs/health.md), [GS session
-restore](docs/gs-restore.md) and [Spaces](docs/spaces.md) — and [Shell
+The first run needs the binary the plugin root holds: `bin/hs path install` (or the
+"Install hs on PATH" plugin action) writes an `hs` shim into `~/.local/bin` that
+resolves the plugin root every time it runs, so `hs` keeps working after a plugin
+update. Each step has its own section — [Install](docs/install.md), [Version and
+doctor](docs/health.md), [GS session restore](docs/gs-restore.md) and
+[Spaces](docs/spaces.md) — and [Shell
 completions](docs/install.md#shell-completions) covers the fish script.
 
 Every behavior above is covered by offline tests (the herdr surface is a fake
@@ -67,6 +70,7 @@ binary is built to run from scripts and plugin actions, not only from hands.
 | `hs space show <name>` | print a stored layout without touching a session | [spaces](docs/spaces.md#showing-a-space) |
 | `hs space list` | every layout visible from here, with its scope | [spaces](docs/spaces.md#project-layouts) |
 | `hs gs-restore install\|remove\|status` | the gentle-shell reporter, default off | [gs-restore](docs/gs-restore.md) |
+| `hs path install\|remove\|status` | put `hs` on `PATH` with an update-safe shim | [install](docs/install.md#path) |
 | `hs version [--check]` | the release this binary was built as, against the manifest | [health](docs/health.md) |
 | `hs doctor` | herdr, socket, config, binary and layout store in one pass | [health](docs/health.md) |
 | `hs completions fish` | print or install the fish completion script | [install](docs/install.md#shell-completions) |
@@ -75,7 +79,7 @@ binary is built to run from scripts and plugin actions, not only from hands.
 
 | Document | Covers |
 | --- | --- |
-| [Install](docs/install.md) | plugin install, the manual binary download and its checksum, the `[[build]]` hook, fish completions |
+| [Install](docs/install.md) | plugin install, the manual binary download and its checksum, the `[[build]]` hook, the `hs` PATH shim, fish completions |
 | [Sessions](docs/sessions.md) | the switcher and every `hs session` subcommand, including fork and confirmations |
 | [Spaces](docs/spaces.md) | save/load/show/list, the dry-run plan, `--replace`, project layouts, layout storage and forked layouts |
 | [GS session restore](docs/gs-restore.md) | the default-off gentle-shell reporter: toggles, install/remove/status, the single-reporter rule |

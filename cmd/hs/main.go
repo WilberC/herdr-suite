@@ -13,6 +13,7 @@ import (
 	"github.com/WilberC/herdr-suite/internal/herdrcli"
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
 	"github.com/WilberC/herdr-suite/internal/layout"
+	"github.com/WilberC/herdr-suite/internal/pathshim"
 	"github.com/WilberC/herdr-suite/internal/session"
 	"github.com/mattn/go-isatty"
 )
@@ -24,6 +25,7 @@ Commands:
   session         Manage herdr sessions
   space           Save and restore herdr spaces
   gs-restore      Install the GS session-restore reporter (default off)
+  path            Put hs on PATH for your shell
   completions     Generate a shell completion script
   doctor          Report the health of this installation
   version         Print the version this binary was built as
@@ -108,6 +110,16 @@ var commands = []command{
 			{name: "remove", summary: "Restore the previous reporter, or remove ours"},
 			{name: "status", summary: "Report the reporter, the backup and the config toggles"},
 			{name: "startup", summary: "Apply the config gate at server start"},
+		},
+	},
+	{
+		name:    "path",
+		summary: "Put hs on PATH for your shell",
+		usage:   pathUsage,
+		subcommands: []subcommand{
+			{name: "install", summary: "Write the hs shim into your bin directory"},
+			{name: "remove", summary: "Delete the shim this command wrote"},
+			{name: "status", summary: "Report the shim, PATH and the plugin"},
 		},
 	},
 	{
@@ -274,6 +286,8 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 		return runSpace(d, args[1:])
 	case "gs-restore":
 		return runGSRestore(d, args[1:])
+	case "path":
+		return runPath(d, args[1:])
 	case "completions":
 		return runCompletions(d, args[1:])
 	case "doctor":
@@ -454,6 +468,11 @@ func report(err error, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "hs: %s\n", gsRefusal.Reason)
 		return 2
 	}
+	var shimRefusal pathshim.Refusal
+	if errors.As(err, &shimRefusal) {
+		fmt.Fprintf(stderr, "hs: %s\n", shimRefusal.Reason)
+		return 2
+	}
 	var stored layout.ExistsError
 	if errors.As(err, &stored) {
 		fmt.Fprintf(stderr, "hs: %v\n", err)
@@ -486,6 +505,11 @@ var groupUsage = map[string]map[string]string{
 		"remove":  gsRestoreRemoveUsage,
 		"status":  gsRestoreStatusUsage,
 		"startup": gsRestoreStartupUsage,
+	},
+	"path": {
+		"install": pathInstallUsage,
+		"remove":  pathRemoveUsage,
+		"status":  pathStatusUsage,
 	},
 }
 

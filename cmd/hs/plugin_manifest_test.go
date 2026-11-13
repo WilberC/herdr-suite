@@ -183,6 +183,7 @@ var hsSubcommands = map[string]map[string]bool{
 	"space":      {"save": true, "load": true, "list": true},
 	"session":    {"list": true, "create": true, "stop": true, "restart": true, "delete": true, "fork": true},
 	"gs-restore": {"install": true, "remove": true, "status": true, "startup": true},
+	"path":       {"install": true, "remove": true, "status": true},
 }
 
 func usageFor(key string) string {
@@ -205,6 +206,14 @@ func usageFor(key string) string {
 		return gsRestoreStatusUsage
 	case "gs-restore startup":
 		return gsRestoreStartupUsage
+	case "path install":
+		return pathInstallUsage
+	case "path remove":
+		return pathRemoveUsage
+	case "path status":
+		return pathStatusUsage
+	case "path":
+		return pathUsage
 	case "session":
 		return sessionUsage
 	}
@@ -286,6 +295,31 @@ func checkHerdrInvocation(t *testing.T, command []string, pluginID string, panes
 	if !panes[entrypoint] {
 		t.Fatalf("command %v opens the undeclared pane %q, want one of %v", command, entrypoint, keys(panes))
 	}
+}
+
+// TestPluginActionsPutHsOnPath pins the user's answer to "what happens to the
+// people who install the plugin?": the PATH shim is offered as an explicit
+// global action, never installed automatically.
+func TestPluginActionsPutHsOnPath(t *testing.T) {
+	document := parseManifest(t, readManifestBytes(t))
+
+	for _, action := range document.Actions {
+		if action.ID != "hs-path" {
+			continue
+		}
+		if action.Title != "Install hs on PATH" {
+			t.Fatalf("action hs-path title = %q, want %q", action.Title, "Install hs on PATH")
+		}
+		if len(action.Contexts) != 1 || action.Contexts[0] != "global" {
+			t.Fatalf("action hs-path contexts = %v, want [global]", action.Contexts)
+		}
+		want := []string{"bin/hs", "path", "install"}
+		if strings.Join(action.Command, " ") != strings.Join(want, " ") {
+			t.Fatalf("action hs-path command = %v, want %v", action.Command, want)
+		}
+		return
+	}
+	t.Fatalf("manifest actions = %v, want the hs-path action", document.Actions)
 }
 
 func flagValue(fields []string, flag string) string {
