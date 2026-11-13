@@ -59,12 +59,12 @@ func TestPathKeysTheStateFileBySocket(t *testing.T) {
 
 func TestPathFallsBackWhenThePluginProvidesNoStateDirectory(t *testing.T) {
 	path := statePath(t, map[string]string{"XDG_STATE_HOME": "/state", "HERDR_SOCKET_PATH": "/tmp/a.sock"})
-	if want := filepath.Join("/state", "herdr-suite"); filepath.Dir(path) != want {
+	if want := filepath.Join("/state", "herdr", "plugins", "herdr-suite"); filepath.Dir(path) != want {
 		t.Fatalf("state directory = %q, want %q", filepath.Dir(path), want)
 	}
 
 	home := statePath(t, map[string]string{"HOME": "/home/person", "HERDR_SOCKET_PATH": ""})
-	if want := filepath.Join("/home/person", ".local", "state", "herdr-suite", "last-default.json"); home != want {
+	if want := filepath.Join("/home/person", ".local", "state", "herdr", "plugins", "herdr-suite", "last-default.json"); home != want {
 		t.Fatalf("state path without a socket = %q, want %q", home, want)
 	}
 

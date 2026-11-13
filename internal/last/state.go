@@ -36,10 +36,10 @@ func Key(socket string) string {
 	return hex.EncodeToString(sum[:])[:socketKeyLength]
 }
 
-// Path resolves the state file. herdr 0.9.5 injects HERDR_PLUGIN_STATE_DIR
-// already pointing at this plugin's own state directory, so it is used as-is;
-// the generic XDG/HOME fallback appends the herdr-suite segment. Either way,
-// one file per socket.
+// Path resolves the state file. herdr injects HERDR_PLUGIN_STATE_DIR pointing
+// at this plugin's own state directory; the XDG/HOME fallback mirrors that
+// herdr layout (…/herdr/plugins/herdr-suite) so a CLI toggle reads exactly the
+// file the event hooks write. One file per socket.
 func Path(getenv func(string) string) (string, error) {
 	base := getenv("HERDR_PLUGIN_STATE_DIR")
 	if base == "" {
@@ -51,7 +51,7 @@ func Path(getenv func(string) string) (string, error) {
 			}
 			base = filepath.Join(home, ".local", "state")
 		}
-		base = filepath.Join(base, stateDirName)
+		base = filepath.Join(base, "herdr", "plugins", stateDirName)
 	}
 	name := stateFilePrefix + Key(getenv("HERDR_SOCKET_PATH")) + stateFileSuffix
 	return filepath.Join(base, name), nil
