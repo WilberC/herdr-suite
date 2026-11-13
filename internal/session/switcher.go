@@ -449,6 +449,11 @@ func (s *switcher) columns(rows []string) string {
 
 const minListWidth = 24
 
+// previewPendingGlyph starts the preview while its read is outstanding. A slow
+// session socket otherwise leaves an empty panel that reads as "no workspaces"
+// rather than "still loading".
+const previewPendingGlyph = "⟳"
+
 // previewLines renders the highlighted session's workspaces: each workspace
 // with its tab and pane counts and herdr's agent state. A session that cannot
 // be read degrades to "unavailable" instead of failing the switcher.
@@ -467,7 +472,7 @@ func (s *switcher) previewLines() []string {
 	}
 	lines := []string{header}
 	if !s.previewDone {
-		return lines
+		return append(lines, "  "+previewPendingGlyph+" loading")
 	}
 	if s.previewErr != nil {
 		return append(lines, "  unavailable")

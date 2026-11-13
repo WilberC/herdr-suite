@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
 	"github.com/WilberC/herdr-suite/internal/layout"
@@ -592,5 +593,104 @@ func TestSpaceLoadRefusesALayoutANewerBuildWrote(t *testing.T) {
 		if call.Method != "ListSessions" && call.Method != "Snapshot" {
 			t.Errorf("a refused load performed %v, want no replay", call)
 		}
+	}
+}
+
+// TestSpaceLoadNamesEveryStepOnStderrWhenTheReplayIsSlow pins the progress
+// contract of the scriptable path: a replay over the budget writes one stderr
+// line per step, and stdout keeps the summary a script reads.
+func TestSpaceLoadNamesEveryStepOnStderrWhenTheReplayIsSlow(t *testing.T) {
+	run := newLoadRun(t)
+	run.saveWork(t)
+	clock := &steppingClock{at: time.Date(2026, 11, 12, 20, 0, 0, 0, time.UTC), step: time.Second}
+	run.d.now = clock.now
+
+	code := run.run(t, "space", "load", "work")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	if want := "loaded layout 'work' into workspace 'project' · 2 tabs · 4 panes · 8 steps\n"; run.stdout.String() != want {
+		t.Fatalf("stdout = %q, want the unchanged summary %q", run.stdout.String(), want)
+	}
+	lines := strings.Split(strings.TrimSpace(run.stderr.String()), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("stderr holds %d lines, want one per step:\n%s", len(lines), run.stderr.String())
+	}
+	if !strings.HasPrefix(lines[0], "[1/8] split right 0.60 in p-1") {
+		t.Fatalf("first stderr line = %q, want the first step", lines[0])
+	}
+	if !strings.HasPrefix(lines[7], "[8/8] focus agent pi") {
+		t.Fatalf("last stderr line = %q, want the last step", lines[7])
+	}
+}
+
+// TestSpaceLoadVerboseNamesEveryStepWithoutChangingStdout pins --verbose: the
+// steps print even when the replay is faster than the budget, and a script sees
+// exactly the same summary.
+func TestSpaceLoadVerboseNamesEveryStepWithoutChangingStdout(t *testing.T) {
+	run := newLoadRun(t)
+	run.saveWork(t)
+
+	code := run.run(t, "space", "load", "work", "--verbose")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	if want := "loaded layout 'work' into workspace 'project' · 2 tabs · 4 panes · 8 steps\n"; run.stdout.String() != want {
+		t.Fatalf("stdout = %q, want the unchanged summary %q", run.stdout.String(), want)
+	}
+	lines := strings.Split(strings.TrimSpace(run.stderr.String()), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("stderr holds %d lines, want one per step:\n%s", len(lines), run.stderr.String())
+	}
+	if got := lines[0]; !strings.HasPrefix(got, "[1/8] split right 0.60") {
+		t.Fatalf("first stderr line = %q, want the first step", got)
+	}
+}
+
+// TestSpaceLoadVerboseNumbersSessionStepsAcrossThePlan pins the session replay's
+// progress: one count over every workspace, each line naming its workspace.
+func TestSpaceLoadVerboseNumbersSessionStepsAcrossThePlan(t *testing.T) {
+	run := newSessionLoadRun(t)
+
+	code := run.run(t, "space", "load", "backup", "--verbose")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	wantStdout := strings.Join([]string{
+		"loaded layout 'backup' into 2 workspaces · 3 tabs · 6 panes · 18 steps",
+		"workspace 'project' · 2 tabs · 4 panes · 11 steps",
+		"workspace 'api' · 1 tab · 2 panes · 7 steps",
+		"",
+	}, "\n")
+	if run.stdout.String() != wantStdout {
+		t.Fatalf("stdout = %q, want the unchanged summary %q", run.stdout.String(), wantStdout)
+	}
+	lines := strings.Split(strings.TrimSpace(run.stderr.String()), "\n")
+	if len(lines) != 18 {
+		t.Fatalf("stderr holds %d lines, want 18:\n%s", len(lines), run.stderr.String())
+	}
+	if got := lines[0]; !strings.HasPrefix(got, "[1/18] workspace 'project': create workspace 'project'") {
+		t.Fatalf("first stderr line = %q, want the first step of the first workspace", got)
+	}
+	if got := lines[17]; !strings.HasPrefix(got, "[18/18] workspace 'api': ") {
+		t.Fatalf("last stderr line = %q, want the last step of the last workspace", got)
+	}
+}
+
+// TestSpaceLoadStaysSilentWhenTheReplayIsFast keeps the default path quiet: no
+// progress lines at all, whatever the steps were.
+func TestSpaceLoadStaysSilentWhenTheReplayIsFast(t *testing.T) {
+	run := newLoadRun(t)
+	run.saveWork(t)
+
+	if code := run.run(t, "space", "load", "work"); code != 0 {
+		t.Fatalf("exit = %d\nstderr:\n%s", code, run.stderr)
+	}
+
+	if run.stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want nothing for a fast replay", run.stderr.String())
 	}
 }

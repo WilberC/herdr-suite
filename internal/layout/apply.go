@@ -31,10 +31,46 @@ func (e StepError) Error() string {
 // Unwrap returns the herdr failure the step reported.
 func (e StepError) Unwrap() error { return e.Err }
 
+// Step is one replay step as an observer reads it: its position in the replay,
+// the action about to run, and the workspace a session replay builds it in.
+// Workspace is empty for a single-workspace replay.
+type Step struct {
+	Index     int
+	Total     int
+	Action    Action
+	Workspace string
+}
+
+// Describe is the one-line form a progress report shows for s: the action, and
+// the workspace when the replay is a session replay.
+func (s Step) Describe() string {
+	if s.Workspace != "" {
+		return fmt.Sprintf("workspace '%s': %s", s.Workspace, s.Action.describe())
+	}
+	return s.Action.describe()
+}
+
+// StepObserver is told which step is about to run, before its herdr call. It is
+// optional: a caller with nothing to report passes nil, and a nil observer is
+// never called. The observer runs in the replay's own goroutine and must not
+// block, so a viewer hands the step to its own loop and returns.
+type StepObserver func(Step)
+
+// notify calls every observer that is not nil.
+func notify(observers []StepObserver, step Step) {
+	for _, observer := range observers {
+		if observer != nil {
+			observer(step)
+		}
+	}
+}
+
 // Apply replays replay against mut, one herdr call per step, and stops at the
 // first failure. The caller reports the StepError: a replay that stopped
-// halfway left a partial layout behind, and herdr cannot roll it back.
-func Apply(ctx context.Context, mut herdrmock.Mutator, replay Replay) error {
+// halfway left a partial layout behind, and herdr cannot roll it back. An
+// observer passed here is told each step before it runs, which is how a slow
+// replay says what it is doing.
+func Apply(ctx context.Context, mut herdrmock.Mutator, replay Replay, observers ...StepObserver) error {
 	state := &liveReplay{
 		workspace: replay.Base.WorkspaceID,
 		tabs:      make(map[int]string, replay.Tabs),
@@ -46,6 +82,7 @@ func Apply(ctx context.Context, mut herdrmock.Mutator, replay Replay) error {
 	}
 
 	for index, action := range replay.Actions {
+		notify(observers, Step{Index: index + 1, Total: len(replay.Actions), Action: action})
 		if err := applyAction(ctx, mut, state, action); err != nil {
 			return StepError{Index: index + 1, Total: len(replay.Actions), Action: action, Err: err}
 		}

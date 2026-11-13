@@ -174,3 +174,46 @@ func TestSwitcherWithoutAPreviewerKeepsThePlainList(t *testing.T) {
 		t.Fatalf("view rendered a preview without a previewer:\n%s", view)
 	}
 }
+
+// TestSwitcherPreviewShowsAPendingGlyphUntilTheReplyArrives pins what a slow
+// preview looks like: while the read is outstanding the preview says it is
+// loading, so an empty panel never reads as "no workspaces", and the glyph is
+// gone once the reply is in.
+func TestSwitcherPreviewShowsAPendingGlyphUntilTheReplyArrives(t *testing.T) {
+	previewer := &fakePreviewer{spaces: map[string][]WorkspacePreview{
+		"alpha": {{Label: "project", Tabs: 1, Panes: 2, Agent: "working"}},
+	}}
+	switcher := newPreviewFixture(t, previewer, herdrmock.Session{Name: "alpha", Running: true})
+
+	pending := switcher.model.Init()
+	if pending == nil {
+		t.Fatalf("no preview command was issued")
+	}
+	view := switcher.model.View()
+	if !strings.Contains(view, "session 'alpha'") || !strings.Contains(view, "⟳ loading") {
+		t.Fatalf("a pending preview does not say it is loading:\n%s", view)
+	}
+
+	switcher.model.Update(pending())
+
+	view = switcher.model.View()
+	if strings.Contains(view, "loading") {
+		t.Fatalf("the loading glyph survived the reply:\n%s", view)
+	}
+	if !strings.Contains(view, "1 tab · 2 panes · working") {
+		t.Fatalf("view does not show the reply:\n%s", view)
+	}
+}
+
+// TestSwitcherPreviewGlyphSkipsAStoppedSession keeps the glyph for reads: a
+// stopped session is never read, so it says it is stopped instead of loading.
+func TestSwitcherPreviewGlyphSkipsAStoppedSession(t *testing.T) {
+	switcher := newPreviewFixture(t, &fakePreviewer{}, herdrmock.Session{Name: "share"})
+
+	if cmd := switcher.model.Init(); cmd != nil {
+		t.Fatalf("a stopped session issued a preview command")
+	}
+	if view := switcher.model.View(); strings.Contains(view, "⟳") {
+		t.Fatalf("a stopped session shows a loading glyph:\n%s", view)
+	}
+}

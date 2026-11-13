@@ -97,18 +97,21 @@ func runGSRestoreInstall(d deps, args []string) int {
 		}
 	}
 
+	clock := d.clock()
+	started := clock()
 	result, err := installReporter(d, force)
+	elapsed := clock().Sub(started)
 	if err != nil {
 		return report(err, d.err)
 	}
 	if result.Already {
-		fmt.Fprintf(d.out, "installed: %s (already current)\nversion:   %s\n", result.Path, gsrestore.ReporterVersion())
+		fmt.Fprintf(d.out, "installed: %s (already current)%s\nversion:   %s\n", result.Path, slowSuffix(elapsed), gsrestore.ReporterVersion())
 		return 0
 	}
 	if result.Backup != "" {
 		fmt.Fprintf(d.out, "backup:    %s\n", result.Backup)
 	}
-	fmt.Fprintf(d.out, "installed: %s\nversion:   %s\n", result.Path, gsrestore.ReporterVersion())
+	fmt.Fprintf(d.out, "installed: %s%s\nversion:   %s\n", result.Path, slowSuffix(elapsed), gsrestore.ReporterVersion())
 	return 0
 }
 
@@ -127,7 +130,7 @@ func installReporter(d deps, force bool) (gsrestore.InstallResult, error) {
 	if err != nil {
 		return gsrestore.InstallResult{}, fmt.Errorf("read the shipped reporter %s: %w", source, err)
 	}
-	return gsrestore.Install(target, reporter, force, d.now())
+	return gsrestore.Install(target, reporter, force, d.clock()())
 }
 
 func runGSRestoreRemove(d deps, args []string) int {
@@ -207,7 +210,10 @@ func runGSRestoreStartup(d deps, args []string) int {
 // runGSRestoreStartupInstall installs idempotently and speaks only when it
 // changed something, so every server start stays quiet once the file is current.
 func runGSRestoreStartupInstall(d deps) int {
+	clock := d.clock()
+	started := clock()
 	result, err := installReporter(d, false)
+	elapsed := clock().Sub(started)
 	if err != nil {
 		return report(err, d.err)
 	}
@@ -217,7 +223,7 @@ func runGSRestoreStartupInstall(d deps) int {
 	if result.Backup != "" {
 		fmt.Fprintf(d.err, "herdr-suite: backed up the previous reporter to %s\n", result.Backup)
 	}
-	fmt.Fprintf(d.err, "herdr-suite: installed GS session restore reporter at %s\n", result.Path)
+	fmt.Fprintf(d.err, "herdr-suite: installed GS session restore reporter at %s%s\n", result.Path, slowSuffix(elapsed))
 	return 0
 }
 

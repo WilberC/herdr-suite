@@ -139,7 +139,7 @@ type deps struct {
 	confirm        session.Confirmer
 	switcher       func(context.Context) (string, error)
 	pick           func([]herdrmock.Workspace) (string, error)
-	pickLayout     func([]layout.Entry) (string, error)
+	pickLayout     layoutPickerFunc
 	reporterSource func() (string, error)
 	now            func() time.Time
 	lookPath       func(string) (string, error)
@@ -196,8 +196,8 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 		d.pick = func(workspaces []herdrmock.Workspace) (string, error) {
 			return pickWorkspace(os.Stdin, stdout, workspaces)
 		}
-		d.pickLayout = func(entries []layout.Entry) (string, error) {
-			return pickLayout(os.Stdin, stdout, entries)
+		d.pickLayout = func(entries []layout.Entry, restore layoutRestore) (layoutPick, error) {
+			return pickLayout(os.Stdin, stdout, entries, restore)
 		}
 	}
 	return d

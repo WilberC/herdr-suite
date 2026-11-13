@@ -34,7 +34,8 @@ Options:
   --session <name>  Replay into that session instead of the current one
   --replace         Close the workspace's other panes and tabs before the replay
   --new-workspace   Build the layout in a new workspace instead of this one
-  --select          Pick the layout interactively, in a new workspace
+  --select          Pick the layout and watch it replay in a new workspace
+  --verbose         Report every replay step on stderr
   --dir <path>      Discover layouts from that directory instead of this one
   --dry-run         Print the replay plan and change nothing
 `
@@ -48,6 +49,7 @@ type loadOptions struct {
 	newWorkspace bool
 	selecting    bool
 	dryRun       bool
+	verbose      bool
 }
 
 func runSpaceLoad(d deps, args []string) int {
@@ -55,11 +57,10 @@ func runSpaceLoad(d deps, args []string) int {
 	if err != nil {
 		return report(err, d.err)
 	}
-	reference, err := loadReference(d, options)
-	if err != nil {
-		return report(err, d.err)
+	if options.selecting {
+		return runSpaceLoadSelect(d, options)
 	}
-	resolved, err := resolveStoredLayout(d, reference, options.dir, spaceLoadUsage)
+	resolved, err := resolveStoredLayout(d, options.name, options.dir, spaceLoadUsage)
 	if err != nil {
 		return report(err, d.err)
 	}
@@ -96,49 +97,14 @@ func runSpaceLoad(d deps, args []string) int {
 	if destination.Replace {
 		fmt.Fprintln(d.err, replaceNote(destination, replay))
 	}
-	if err := layout.Apply(ctx, d.writer.Mutations(target), replay); err != nil {
-		var step layout.StepError
-		if !errors.As(err, &step) {
-			return report(err, d.err)
-		}
-		fmt.Fprintf(d.err, "hs: %v\n", err)
-		fmt.Fprintf(d.err, "hs: herdr has no transaction, so the workspace may hold a partial layout. Remove the panes or tabs it created and load again.\n")
-		return 1
+	progress := newStepProgress(d.err, options.verbose, progressBudget, d.clock())
+	err = layout.Apply(ctx, d.writer.Mutations(target), replay, progress.report)
+	progress.finish()
+	if err != nil {
+		return reportReplayFailure(d, err)
 	}
 	fmt.Fprint(d.out, layout.ReplaySummary(replay))
 	return 0
-}
-
-// loadReference is the layout reference a load starts from: the stored name, or
-// the file the interactive picker selects.
-func loadReference(d deps, options loadOptions) (string, error) {
-	if !options.selecting {
-		return options.name, nil
-	}
-	if !d.interactive || d.pickLayout == nil {
-		return "", session.Refusal{Reason: "the layout picker needs a terminal; pass a layout name"}
-	}
-
-	sources, err := layoutSources(d, options.dir)
-	if err != nil {
-		return "", err
-	}
-	entries, err := layout.List(sources)
-	if err != nil {
-		return "", err
-	}
-	if len(entries) == 0 {
-		return "", session.Refusal{Reason: "no layout is stored here; create one with hs space save"}
-	}
-
-	picked, err := d.pickLayout(entries)
-	if err != nil {
-		return "", err
-	}
-	if picked == "" {
-		return "", session.ErrCancelled
-	}
-	return picked, nil
 }
 
 // loadSessionLayout replays a session layout: every workspace it stores is
@@ -165,14 +131,11 @@ func loadSessionLayout(d deps, options loadOptions, target herdrmock.Target, spa
 		return 0
 	}
 
-	if err := layout.ApplySession(context.Background(), d.writer.Mutations(target), plan); err != nil {
-		var step layout.StepError
-		if !errors.As(err, &step) {
-			return report(err, d.err)
-		}
-		fmt.Fprintf(d.err, "hs: %v\n", err)
-		fmt.Fprintf(d.err, "hs: herdr has no transaction, so the session may hold a partial layout. Remove the workspaces, tabs or panes it created and load again.\n")
-		return 1
+	progress := newStepProgress(d.err, options.verbose, progressBudget, d.clock())
+	err = layout.ApplySession(context.Background(), d.writer.Mutations(target), plan, progress.report)
+	progress.finish()
+	if err != nil {
+		return reportReplayFailure(d, err)
 	}
 	fmt.Fprint(d.out, layout.SessionReplaySummary(plan))
 	return 0
@@ -194,6 +157,8 @@ func parseLoadArgs(args []string) (loadOptions, error) {
 			options.dryRun = true
 		case arg == "--select":
 			options.selecting = true
+		case arg == "--verbose":
+			options.verbose = true
 		case arg == "--dir":
 			if index+1 >= len(args) {
 				return loadOptions{}, usageError{reason: "--dir needs a directory", usage: spaceLoadUsage}
@@ -237,7 +202,7 @@ func loadDestination(d deps, target herdrmock.Target, space herdrmock.Space, doc
 		Keep:    d.getenv("HERDR_PANE_ID"),
 		Agents:  liveAgents(space),
 	}
-	if options.newWorkspace || options.selecting {
+	if options.newWorkspace {
 		return destination, nil
 	}
 
@@ -362,4 +327,129 @@ func countLabel(count int, noun string) string {
 		return fmt.Sprintf("%d %s", count, noun)
 	}
 	return fmt.Sprintf("%d %ss", count, noun)
+}
+
+// runSpaceLoadSelect is "hs space load --select": the picker runs the replay
+// itself, so its spinner and per-step report cover the whole restore.
+func runSpaceLoadSelect(d deps, options loadOptions) int {
+	if !d.interactive || d.pickLayout == nil {
+		return report(session.Refusal{Reason: "the layout picker needs a terminal; pass a layout name"}, d.err)
+	}
+
+	sources, err := layoutSources(d, options.dir)
+	if err != nil {
+		return report(err, d.err)
+	}
+	entries, err := layout.List(sources)
+	if err != nil {
+		return report(err, d.err)
+	}
+	if len(entries) == 0 {
+		return report(session.Refusal{Reason: "no layout is stored here; create one with hs space save"}, d.err)
+	}
+
+	ctx := context.Background()
+	target, err := sessionTarget(ctx, d, options.session, spaceLoadUsage)
+	if err != nil {
+		return report(err, d.err)
+	}
+
+	var restore layoutRestore
+	if !options.dryRun {
+		restore = func(entry layout.Entry, report func(layout.Step)) (string, error) {
+			return restorePickedLayout(d, ctx, target, entry, report)
+		}
+	}
+	picked, err := d.pickLayout(entries, restore)
+	if err != nil {
+		return reportReplayFailure(d, err)
+	}
+	if options.dryRun {
+		return printPickedPlan(d, ctx, target, picked.Entry)
+	}
+	if picked.Summary != "" {
+		fmt.Fprintln(d.out, picked.Summary)
+	}
+	return 0
+}
+
+// restorePickedLayout is the replay the picker runs in-program. --select always
+// builds in a new workspace, so the destination carries no existing workspace
+// and the replay creates the stored one.
+func restorePickedLayout(d deps, ctx context.Context, target herdrmock.Target, entry layout.Entry, report func(layout.Step)) (string, error) {
+	document, _, err := layout.LoadFile(entry.Path)
+	if err != nil {
+		return "", layoutRefusal(err, entry.Path)
+	}
+	space, err := d.spaces.Snapshot(ctx, target)
+	if err != nil {
+		return "", fmt.Errorf("snapshot %s: %w", describeTarget(target), err)
+	}
+	destination := layout.Target{Keep: d.getenv("HERDR_PANE_ID"), Agents: liveAgents(space)}
+
+	if document.Multi() {
+		plan, err := layout.PlanSession(document, destination)
+		if err != nil {
+			return "", err
+		}
+		if err := layout.ApplySession(ctx, d.writer.Mutations(target), plan, layout.StepObserver(report)); err != nil {
+			return "", err
+		}
+		return layout.SessionReplaySummary(plan), nil
+	}
+
+	replay, err := layout.Plan(document, destination)
+	if err != nil {
+		return "", err
+	}
+	if err := layout.Apply(ctx, d.writer.Mutations(target), replay, layout.StepObserver(report)); err != nil {
+		return "", err
+	}
+	return layout.ReplaySummary(replay), nil
+}
+
+// printPickedPlan is the dry run of an interactive load: the picker only chose,
+// and the plan prints exactly as a named dry run prints it.
+func printPickedPlan(d deps, ctx context.Context, target herdrmock.Target, entry layout.Entry) int {
+	document, _, err := layout.LoadFile(entry.Path)
+	if err != nil {
+		return report(layoutRefusal(err, entry.Path), d.err)
+	}
+	space, err := d.spaces.Snapshot(ctx, target)
+	if err != nil {
+		return report(fmt.Errorf("snapshot %s: %w", describeTarget(target), err), d.err)
+	}
+	destination := layout.Target{Keep: d.getenv("HERDR_PANE_ID"), Agents: liveAgents(space)}
+
+	if document.Multi() {
+		plan, err := layout.PlanSession(document, destination)
+		if err != nil {
+			return report(err, d.err)
+		}
+		fmt.Fprint(d.out, layout.RenderSessionPlan(plan))
+		return 0
+	}
+	replay, err := layout.Plan(document, destination)
+	if err != nil {
+		return report(err, d.err)
+	}
+	fmt.Fprint(d.out, layout.RenderPlan(replay))
+	return 0
+}
+
+// reportReplayFailure is the stderr contract of a replay that stopped halfway:
+// the failing step, then the warning that herdr cannot undo it. The warning
+// names the unit the failed replay left behind.
+func reportReplayFailure(d deps, err error) int {
+	var step layout.StepError
+	if !errors.As(err, &step) {
+		return report(err, d.err)
+	}
+	fmt.Fprintf(d.err, "hs: %v\n", err)
+	if step.Workspace == "" {
+		fmt.Fprintf(d.err, "hs: herdr has no transaction, so the workspace may hold a partial layout. Remove the panes or tabs it created and load again.\n")
+	} else {
+		fmt.Fprintf(d.err, "hs: herdr has no transaction, so the session may hold a partial layout. Remove the workspaces, tabs or panes it created and load again.\n")
+	}
+	return 1
 }

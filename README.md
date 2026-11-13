@@ -117,7 +117,8 @@ hs space load work --dry-run    # print the replay plan and change nothing
 hs space load work --replace    # close the workspace's other panes and tabs first
 hs space load work --new-workspace  # build it in a new workspace
 hs space load work --session api    # replay into another session
-hs space load --select          # pick a stored layout in a new workspace
+hs space load work --verbose    # one [k/n] stderr line per replay step
+hs space load --select          # pick a stored layout and watch it restore, in a new workspace
 hs space load ./hand/made.json  # load a layout file by path
 hs space list                   # NAME, SCOPE, WORKSPACE, TABS, PANES, MODIFIED
 hs space list --json            # {"layouts":[{"name","scope","workspace",...}]}
@@ -275,6 +276,21 @@ load asks which workspace to use. It refuses to guess without a terminal, so
 scripts either run it where the stored workspace is active or pass
 `--new-workspace`.
 
+`--select` picks the layout from the same list `hs space list` prints and
+replays it in a new workspace. Enter is no longer the end of the picker: it
+becomes a restoring view that names the layout and the step that is starting,
+then a one-line done state before the command prints the summary a named load
+prints.
+
+```text
+⠹ restoring 'work' — step 3/8 split right 0.60 in p-1 · new pane p-3 · cwd /tmp
+```
+
+A replay that fails shows the step that stopped it and waits for a key; the
+command then prints the failure and exits `1`, exactly as a named load does.
+Ctrl-C while restoring stops watching and leaves the picker. `--select
+--dry-run` only chooses: it prints the plan and changes nothing.
+
 `--dry-run` prints the replay plan and changes nothing: the ordered list of
 closes, creations, splits, renames, agent starts and focus steps, with the stored
 pane ids, the directions and the ratios the replay would use.
@@ -301,6 +317,28 @@ then the stored focused tab, then the agent of the stored focused pane when it h
 one. herdr's CLI cannot focus a pane by id, so the replayed pane receives focus by
 being the only one created with `--focus`; a stored focused pane that no split
 creates keeps its tab's focus.
+
+### Long operations
+
+Progress is a stderr contract, so stdout stays exactly what a script reads:
+
+| Operation | Silent | Speaks |
+| --- | --- | --- |
+| `hs space load <name>` | the replay finishes under two seconds | over the budget, one `[k/n] <action>` line per step, the steps that already ran included; `--verbose` prints them even when the replay is fast |
+| `hs space load --select` | never: the picker owns the terminal | the restoring view names the layout and the step that is starting, and Ctrl-C stops watching |
+| the switcher preview | the session answers at once | the preview header shows `⟳ loading` until the workspaces arrive |
+| `hs gs-restore install` | the install finishes under two seconds | the `installed:` line gains `(took 2.4s)` |
+| `hs gs-restore startup` | nothing changed, or the install was fast | the changed line gains the same suffix |
+
+The budget is two seconds. Under it nothing changes, which keeps fast runs and
+scripts byte-for-byte what they were; over it the operation says what it is doing
+instead of looking hung, and a failure still prints the step that stopped it:
+
+```text
+[5/8] create tab 2 'side' · cwd /tmp
+hs: step 5 of 8 failed: create tab 2 'side' · cwd /tmp: herdr tab create: exit status 1: pane limit reached
+hs: herdr has no transaction, so the workspace may hold a partial layout. ...
+```
 
 ### Project layouts
 
@@ -545,7 +583,9 @@ exits.
 
 The switcher shows the highlighted session's workspaces beside the list —
 labels, tab and pane counts, and herdr's agent state — read through the same
-access layer that space snapshots use. A session that cannot be read shows
+access layer that space snapshots use. The read is asynchronous, so the preview
+header shows `⟳ loading` while it is outstanding and a slow session reads as work
+in progress instead of an empty list. A session that cannot be read shows
 `unavailable`, and a stopped one shows that it is stopped without a read.
 
 The herdr binary is found through `HERDR_BIN_PATH`, then `PATH`.
@@ -642,6 +682,13 @@ keeps `dev`, which is why `hs version --check` can tell a stale binary from the
 manifest it sits beside. Both workflows read the toolchain from
 `go-version-file: go.mod`, so the version lives in one place, and neither needs a
 release tool: the pipeline is `go`, `sha256sum` and `gh` only.
+
+A `smoke` job runs after `publish` and checks the release rather than the working
+tree: it downloads `hs-linux-amd64` and `SHA256SUMS` back from the tag it just
+created, verifies the binary against the checksum, and runs `./hs-linux-amd64
+version --check` and `./hs-linux-amd64 --help`. A published asset that is broken,
+or stamped with a version the manifest does not declare, fails the run instead of
+an install.
 
 The matrix stops at linux and darwin, the two platforms `herdr-plugin.toml`
 declares. A Windows binary is deliberately not shipped: `syscall.Exec` returns

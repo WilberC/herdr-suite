@@ -154,3 +154,43 @@ func mustCaptureSession(t *testing.T, name string, space herdrmock.Space) Layout
 	}
 	return document
 }
+
+// TestApplySessionNumbersItsStepsAcrossTheWholePlan pins what a session loader
+// shows: one count over every workspace, and the workspace each step builds in.
+func TestApplySessionNumbersItsStepsAcrossTheWholePlan(t *testing.T) {
+	plan, err := PlanSession(sessionLayout(), Target{})
+	if err != nil {
+		t.Fatalf("PlanSession error = %v, want nil", err)
+	}
+	client := applyFake()
+	var steps []Step
+
+	err = ApplySession(context.Background(), client.Mutations(herdrmock.Target{}), plan, func(step Step) {
+		steps = append(steps, step)
+	})
+	if err != nil {
+		t.Fatalf("ApplySession error = %v, want nil", err)
+	}
+
+	if len(steps) != plan.Steps {
+		t.Fatalf("observer saw %d steps, want %d", len(steps), plan.Steps)
+	}
+	var workspaces []string
+	for index, step := range steps {
+		if step.Index != index+1 || step.Total != plan.Steps {
+			t.Fatalf("step %d = %d of %d, want %d of %d", index, step.Index, step.Total, index+1, plan.Steps)
+		}
+		if step.Workspace == "" {
+			t.Fatalf("step %d names no workspace", step.Index)
+		}
+		if len(workspaces) == 0 || workspaces[len(workspaces)-1] != step.Workspace {
+			workspaces = append(workspaces, step.Workspace)
+		}
+		if !strings.HasPrefix(step.Describe(), "workspace '"+step.Workspace+"': ") {
+			t.Fatalf("step %d describes %q, want it to name workspace %q", step.Index, step.Describe(), step.Workspace)
+		}
+	}
+	if want := []string{"project", "api"}; strings.Join(workspaces, ",") != strings.Join(want, ",") {
+		t.Fatalf("step workspaces = %v, want %v", workspaces, want)
+	}
+}

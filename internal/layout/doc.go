@@ -110,7 +110,9 @@
 // Plan is the inverse of Capture: it turns a stored layout into the ordered
 // ladder of herdr mutations that recreates it, and Apply walks that ladder. herdr
 // has no transaction, so a replay is a sequence of explicit calls and a failure
-// names the step that stopped it.
+// names the step that stopped it. An optional StepObserver is told each step
+// before its herdr call, which is how a surface reports a slow replay; a nil
+// observer is never called, so a caller with nothing to report passes nothing.
 //
 // The order is depth first, parents before children. A binary split in herdr is
 // made by splitting one pane, so a replayed split consumes the pane that owns
@@ -153,7 +155,9 @@
 // PlanSession builds one replay per stored workspace, and every one of them
 // starts by creating its workspace, so nothing in the session is replaced.
 // ApplySession walks the replays in stored order and a failure names both the
-// workspace and the step. Each replay restores its own focus last, which leaves
+// workspace and the step. Its observer is numbered over the whole plan rather
+// than restarting in each workspace, so one report covers the session. Each
+// replay restores its own focus last, which leaves
 // the last stored workspace focused. Agent names are chosen across the whole
 // plan, because herdr keeps them unique per session rather than per workspace.
 package layout

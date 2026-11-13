@@ -223,3 +223,45 @@ func TestCIWorkflowGatesBuildFormatAndTests(t *testing.T) {
 		t.Fatalf("the test job does not fail on unformatted files:\n%s", test)
 	}
 }
+
+// TestReleaseWorkflowSmokesThePublishedAsset pins the post-publish check: the
+// workflow downloads the asset it just published, verifies it against
+// SHA256SUMS, and runs it the way an installer would, on the tag that was just
+// created.
+func TestReleaseWorkflowSmokesThePublishedAsset(t *testing.T) {
+	source := workflowSource(t, "release.yml")
+	jobs := workflowJobs(t, source)
+
+	smoke, ok := jobs["smoke"]
+	if !ok {
+		t.Fatalf("release.yml declares the jobs %v, want a smoke job", jobNames(jobs))
+	}
+	for _, want := range []string{
+		"needs: publish",
+		"actions/checkout",
+		`GH_TOKEN: ${{ github.token }}`,
+		`gh release download "$GITHUB_REF_NAME"`,
+		`--pattern "hs-linux-amd64"`,
+		`--pattern "SHA256SUMS"`,
+		"sha256sum --check",
+		"./hs-linux-amd64 version --check",
+		"./hs-linux-amd64 --help",
+	} {
+		if !strings.Contains(smoke, want) {
+			t.Errorf("the smoke job does not contain %q:\n%s", want, smoke)
+		}
+	}
+	for _, unwanted := range []string{"|| true", "continue-on-error", "if: always()"} {
+		if strings.Contains(smoke, unwanted) {
+			t.Errorf("the smoke job swallows a failed check with %q:\n%s", unwanted, smoke)
+		}
+	}
+
+	download := strings.Index(smoke, "gh release download")
+	checksum := strings.Index(smoke, "sha256sum --check")
+	version := strings.Index(smoke, "version --check")
+	help := strings.Index(smoke, "--help")
+	if download < 0 || checksum < download || version < checksum || help < version {
+		t.Fatalf("the smoke job does not download, verify and then run the asset in order:\n%s", smoke)
+	}
+}

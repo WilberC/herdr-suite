@@ -9,6 +9,7 @@ import (
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
 	"github.com/WilberC/herdr-suite/internal/layout"
+	"github.com/WilberC/herdr-suite/internal/session"
 )
 
 func newSessionLoadRun(t *testing.T) *spaceRun {
@@ -132,11 +133,11 @@ func TestSpaceLoadSelectsALayoutInteractively(t *testing.T) {
 	run := newSessionLoadRun(t)
 	run.d.interactive = true
 	var offered []string
-	run.d.pickLayout = func(entries []layout.Entry) (string, error) {
+	run.d.pickLayout = func(entries []layout.Entry, restore layoutRestore) (layoutPick, error) {
 		for _, entry := range entries {
 			offered = append(offered, entry.Name+"@"+entry.Scope)
 		}
-		return run.layoutPath("backup"), nil
+		return pickEntry(t, entries, "backup", restore)
 	}
 
 	code := run.run(t, "space", "load", "--select")
@@ -156,7 +157,9 @@ func TestSpaceLoadSelectBuildsASingleWorkspaceLayoutInANewWorkspace(t *testing.T
 	run := newLoadRun(t)
 	run.saveWork(t)
 	run.d.interactive = true
-	run.d.pickLayout = func([]layout.Entry) (string, error) { return run.layoutPath("work"), nil }
+	run.d.pickLayout = func(entries []layout.Entry, restore layoutRestore) (layoutPick, error) {
+		return pickEntry(t, entries, "work", restore)
+	}
 
 	code := run.run(t, "space", "load", "--select")
 
@@ -300,5 +303,104 @@ func TestSpaceSaveCurrentRejectsALayoutName(t *testing.T) {
 	}
 	if calls := run.client.Calls(); len(calls) != 0 {
 		t.Fatalf("bad arguments issued calls: %v", calls)
+	}
+}
+
+// pickEntry is what a picker seam does in a CLI test: confirm one entry and run
+// the restore exactly where the real picker runs it.
+func pickEntry(t *testing.T, entries []layout.Entry, name string, restore layoutRestore) (layoutPick, error) {
+	t.Helper()
+	for _, entry := range entries {
+		if entry.Name != name {
+			continue
+		}
+		if restore == nil {
+			return layoutPick{Entry: entry}, nil
+		}
+		summary, err := restore(entry, nil)
+		return layoutPick{Entry: entry, Summary: summary, Restored: err == nil}, err
+	}
+	t.Fatalf("layout %q was not offered; got %#v", name, entries)
+	return layoutPick{}, errors.New("unreachable")
+}
+
+// TestSpaceLoadSelectCancelsCleanly keeps the exit status a cancelled pick had:
+// the command says it was cancelled and succeeds, as it did before the picker
+// ran the replay itself.
+func TestSpaceLoadSelectCancelsCleanly(t *testing.T) {
+	run := newLoadRun(t)
+	run.saveWork(t)
+	run.d.interactive = true
+	run.d.pickLayout = func([]layout.Entry, layoutRestore) (layoutPick, error) {
+		return layoutPick{}, session.ErrCancelled
+	}
+
+	code := run.run(t, "space", "load", "--select")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	if want := "cancelled"; !strings.Contains(run.stderr.String(), want) {
+		t.Fatalf("stderr = %q, want it to contain %q", run.stderr.String(), want)
+	}
+	if ops := run.client.Ops(); len(ops) != 0 {
+		t.Fatalf("a cancelled pick issued calls: %#v", ops)
+	}
+}
+
+// TestSpaceLoadSelectReportsAFailedInProgramRestore pins the failure contract of
+// the interactive path: the picker ran the replay, so the command reports the
+// failing step and the partial-layout warning exactly as the named load does.
+func TestSpaceLoadSelectReportsAFailedInProgramRestore(t *testing.T) {
+	run := newLoadRun(t)
+	run.saveWork(t)
+	run.d.interactive = true
+	run.client.Fail = func(op herdrmock.Op) error {
+		if op.Method == "CreateTab" {
+			return errors.New("pane limit reached")
+		}
+		return nil
+	}
+	run.d.pickLayout = func(entries []layout.Entry, restore layoutRestore) (layoutPick, error) {
+		return pickEntry(t, entries, "work", restore)
+	}
+
+	code := run.run(t, "space", "load", "--select")
+
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1\nstdout:\n%s\nstderr:\n%s", code, run.stdout, run.stderr)
+	}
+	for _, want := range []string{"step 7 of 11 failed", "pane limit reached", "no transaction"} {
+		if !strings.Contains(run.stderr.String(), want) {
+			t.Fatalf("stderr = %q, want it to contain %q", run.stderr.String(), want)
+		}
+	}
+}
+
+// TestSpaceLoadSelectDryRunPrintsThePlanAndRestoresNothing keeps the dry-run pick
+// intact: the picker only chooses, and the plan prints as it always did.
+func TestSpaceLoadSelectDryRunPrintsThePlanAndRestoresNothing(t *testing.T) {
+	run := newLoadRun(t)
+	run.saveWork(t)
+	run.d.interactive = true
+	run.d.pickLayout = func(entries []layout.Entry, restore layoutRestore) (layoutPick, error) {
+		if restore != nil {
+			return layoutPick{}, errors.New("a dry run handed the picker a restore")
+		}
+		return pickEntry(t, entries, "work", restore)
+	}
+
+	code := run.run(t, "space", "load", "--select", "--dry-run")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	for _, want := range []string{"plan for layout 'work'", "11. focus agent pi"} {
+		if !strings.Contains(run.stdout.String(), want) {
+			t.Fatalf("stdout = %q, want it to contain %q", run.stdout.String(), want)
+		}
+	}
+	if ops := run.client.Ops(); len(ops) != 0 {
+		t.Fatalf("a dry run issued calls: %#v", ops)
 	}
 }

@@ -130,3 +130,56 @@ func TestApplyCreatesAWorkspaceThenBuildsInIt(t *testing.T) {
 		t.Fatalf("focus op = %#v, want the created workspace focused", last)
 	}
 }
+
+// TestApplyReportsEveryStepBeforeItRuns pins the observer contract the loaders
+// read: one report per step, numbered from one over the whole replay, delivered
+// before the step reaches herdr so a slow step is named while it runs.
+func TestApplyReportsEveryStepBeforeItRuns(t *testing.T) {
+	replay, err := Plan(wantLayout(), emptyTarget())
+	if err != nil {
+		t.Fatalf("Plan error = %v", err)
+	}
+	client := applyFake()
+	var steps []Step
+	var opsAtReport []int
+
+	err = Apply(context.Background(), client.Mutations(herdrmock.Target{}), replay, func(step Step) {
+		steps = append(steps, step)
+		opsAtReport = append(opsAtReport, len(client.Ops()))
+	})
+	if err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+
+	if len(steps) != len(replay.Actions) {
+		t.Fatalf("observer saw %d steps, want %d", len(steps), len(replay.Actions))
+	}
+	for index, step := range steps {
+		if step.Index != index+1 || step.Total != len(replay.Actions) {
+			t.Fatalf("step %d = %d of %d, want %d of %d", index, step.Index, step.Total, index+1, len(replay.Actions))
+		}
+		if step.Describe() != replay.Actions[index].describe() {
+			t.Fatalf("step %d describes %q, want %q", step.Index, step.Describe(), replay.Actions[index].describe())
+		}
+		if opsAtReport[index] != index {
+			t.Fatalf("step %d was reported after %d calls, want it reported before the step runs", step.Index, opsAtReport[index])
+		}
+	}
+}
+
+// TestApplyAcceptsANilObserver keeps the callback optional: every caller that
+// has nothing to report passes nil and the replay behaves as before.
+func TestApplyAcceptsANilObserver(t *testing.T) {
+	replay, err := Plan(wantLayout(), emptyTarget())
+	if err != nil {
+		t.Fatalf("Plan error = %v", err)
+	}
+	client := applyFake()
+
+	if err := Apply(context.Background(), client.Mutations(herdrmock.Target{}), replay, nil); err != nil {
+		t.Fatalf("Apply error = %v, want nil", err)
+	}
+	if len(client.Ops()) != len(replay.Actions) {
+		t.Fatalf("replayed %d calls, want %d", len(client.Ops()), len(replay.Actions))
+	}
+}

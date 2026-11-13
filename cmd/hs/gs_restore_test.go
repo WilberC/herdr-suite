@@ -757,3 +757,46 @@ func TestGSRestoreStatusRejectsBadArguments(t *testing.T) {
 		})
 	}
 }
+
+// TestGSRestoreInstallNamesHowLongASlowInstallTook pins the installer's progress
+// report: an install that passed the budget says how long it took, an install
+// under it prints exactly the line it always printed.
+func TestGSRestoreInstallNamesHowLongASlowInstallTook(t *testing.T) {
+	run := newGSRun(t)
+	base := time.Date(2026, 11, 12, 20, 0, 0, 0, time.UTC)
+	clock := &jumpClock{first: base, then: base.Add(2500 * time.Millisecond)}
+	run.d.now = clock.now
+
+	code := run.run(t, "gs-restore", "install")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	want := "installed: " + run.reporterPath() + " (took 2.5s)\nversion:   v1\n"
+	if got := run.stdout.String(); got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(run.reporterPath()); err != nil {
+		t.Fatalf("the slow install wrote no reporter: %v", err)
+	}
+}
+
+// TestGSRestoreStartupSuffixesASlowAutoInstall keeps the server-start path quiet
+// when it is fast and informative when it is not.
+func TestGSRestoreStartupSuffixesASlowAutoInstall(t *testing.T) {
+	run := newGSRun(t)
+	run.writeConfig(t, `{"gs_restore": {"install": true, "auto_install": true}}`)
+	base := time.Date(2026, 11, 12, 20, 0, 0, 0, time.UTC)
+	clock := &jumpClock{first: base, then: base.Add(2500 * time.Millisecond)}
+	run.d.now = clock.now
+
+	code := run.run(t, "gs-restore", "startup")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	want := "herdr-suite: installed GS session restore reporter at " + run.reporterPath() + " (took 2.5s)\n"
+	if got := run.stderr.String(); got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}

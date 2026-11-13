@@ -53,10 +53,15 @@ func PlanSession(document Layout, target Target) (SessionPlan, error) {
 }
 
 // ApplySession replays every workspace of plan, one herdr call per step, and
-// stops at the first failure with the workspace the failing step belongs to.
-func ApplySession(ctx context.Context, mut herdrmock.Mutator, plan SessionPlan) error {
+// stops at the first failure with the workspace the failing step belongs to. An
+// observer is told every step before it runs, numbered over the whole plan, so a
+// session replay reports one count instead of restarting in each workspace.
+func ApplySession(ctx context.Context, mut herdrmock.Mutator, plan SessionPlan, observers ...StepObserver) error {
+	offset := 0
 	for _, replay := range plan.Workspaces {
-		if err := Apply(ctx, mut, replay); err != nil {
+		numbered := observersFor(observers, replay.Workspace, offset, plan.Steps)
+		offset += len(replay.Actions)
+		if err := Apply(ctx, mut, replay, numbered...); err != nil {
 			var step StepError
 			if errors.As(err, &step) {
 				step.Workspace = replay.Workspace
@@ -66,6 +71,24 @@ func ApplySession(ctx context.Context, mut herdrmock.Mutator, plan SessionPlan) 
 		}
 	}
 	return nil
+}
+
+// observersFor renumbers one workspace's steps into the plan's global count and
+// names the workspace, keeping a nil observer nil so Apply skips it.
+func observersFor(observers []StepObserver, workspace string, offset, total int) []StepObserver {
+	numbered := make([]StepObserver, len(observers))
+	for index, observer := range observers {
+		if observer == nil {
+			continue
+		}
+		numbered[index] = func(step Step) {
+			step.Index += offset
+			step.Total = total
+			step.Workspace = workspace
+			observer(step)
+		}
+	}
+	return numbered
 }
 
 // RenderSessionPlan prints the ordered session replay as the stable text
