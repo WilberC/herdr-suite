@@ -1,16 +1,30 @@
-# herdr-suite
+<p align="center">
+  <img src="docs/media/banner.png" width="680" alt="herdr-suite">
+</p>
 
-Session and space management for [herdr](https://herdr.dev): switch named
-sessions, and snapshot a workspace layout so it can be recreated later.
-
-<!-- Badges go live with the first v* tag; uncomment them then.
 [![CI](https://github.com/WilberC/herdr-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/WilberC/herdr-suite/actions/workflows/ci.yml)
 [![release](https://github.com/WilberC/herdr-suite/actions/workflows/release.yml/badge.svg)](https://github.com/WilberC/herdr-suite/actions/workflows/release.yml)
--->
 
-The same Go binary serves both surfaces: a non-interactive CLI for scripts and
-herdr plugin actions that run inside herdr. Destructive operations require
-confirmation, and non-interactive commands keep stable exit codes and stdout.
+**Session switching and workspace layout snapshots for
+[herdr](https://herdr.dev)** — one Go binary, two surfaces: an interactive
+switcher and a scriptable CLI that doubles as herdr plugin actions.
+
+## What it solves
+
+- **Sessions without typing commands** — attach, create, stop, restart or delete
+  named sessions from one popup, or script them with stable exit codes.
+- **Workspaces that cannot be restored** — snapshot a workspace's split tree
+  (directions, ratios, labels, cwds, agents) and recreate it exactly,
+  with a dry-run plan first.
+- **Gentle Shell restores as Gentle Shell** — an optional, default-off reporter
+  so herdr relaunches your sessions through the `gentle-shell` launcher instead
+  of vanilla pi.
+
+<p align="center">
+  <img src="docs/media/doctor.svg" width="680" alt="hs doctor output">
+  <br>
+  <img src="docs/media/layouts.svg" width="680" alt="hs space save · show · load">
+</p>
 
 ## Quick start
 
@@ -29,37 +43,15 @@ the `hs` lines. Each step has its own section — [Install](#install),
 restore](#gs-session-restore) and [Spaces](#spaces) — and [Shell
 completions](#shell-completions) covers the fish script.
 
-## Status
+Every behavior above is covered by offline tests (the herdr surface is a fake
+in tests, so no test ever touches a socket), and every release binary is
+smoke-tested by the release workflow itself. Destructive commands always ask
+first, and non-interactive output keeps stable exit codes and stdout — the
+binary is built to run from scripts and plugin actions, not only from hands.
 
-`hs` replaces `herdr-sessionizer`: the interactive switcher, the session
-lifecycle commands, saving and restoring spaces, project layout discovery,
-session forks and the plugin actions are implemented.
-
-- `hs` and `hs session ...` manage sessions, and `hs session fork` snapshots a
-  whole session as one layout.
-- `hs space save` snapshots the active workspace as a stored layout.
-- `hs space load` recreates a stored layout, in a workspace or as every
-  workspace a fork captured.
-- `hs space list` lists the layouts visible from the current directory.
-- `hs space show` prints a stored layout — header, split trees, labels, cwds and
-  agents — without touching a session or loading it.
-- `hs completions fish` generates the fish completion script, and `--install`
-  writes it into fish's own completion directory.
-- `hs version` reports the build version, and `hs version --check` compares it
-  with the manifest so a stale binary is caught; `hs doctor` reports the whole
-  installation one line at a time.
-- `herdr-plugin.toml` declares the `save`, `load`, `list` and `gs-install`
-  actions, the two panes the first three open, and the `gs-restore startup` hook.
-- `hs gs-restore` installs, removes and reports the GS session-restore reporter;
-  the feature is default off (see [GS session restore](#gs-session-restore)), and
-  `hs gs-restore status --json` prints that report as one document.
-- `internal/herdrmock` is the offline fake of the herdr surface used by tests.
-- `.github/workflows/release.yml` publishes the release binaries and their
-  checksums on a `v*` tag, and `.github/workflows/ci.yml` gates every push.
-
-No release is tagged yet, and herdr runs no build step for this manifest, so
-`herdr-plugin.toml` names a `bin/hs` that only a release download or a local
-build puts there. See [Install](#install) and [Inside herdr](#inside-herdr).
+Details: [Usage](#usage) · [Spaces](#spaces) · [GS session
+restore](#gs-session-restore) · [Version and doctor](#version-and-doctor) ·
+[Install](#install) · [Development](#development)
 
 ## Install
 

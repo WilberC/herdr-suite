@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 386" width="880">
+<rect width="100%" height="100%" rx="12" fill="#0f0f14"/>
+<rect x="1" y="1" width="99.8%" height="99.8%" rx="12" fill="none" stroke="#2a2a35"/>
+<circle cx="44" cy="28" r="6.5" fill="#ff5f57"/><circle cx="64" cy="28" r="6.5" fill="#febc2e"/><circle cx="84" cy="28" r="6.5" fill="#28c840"/>
+<text x="852" y="32" font-family="Menlo,monospace" font-size="12" fill="#6a6a78" text-anchor="end">hs doctor</text>
+<text x="30" y="82" font-family="Menlo,monospace" font-size="13" fill="#e0e0ea" font-weight="bold"><tspan fill="#7aa2f7" font-weight="bold">❯</tspan> hs doctor</text>
+<text x="30" y="102" font-family="Menlo,monospace" font-size="13" fill="#9ece6a">  PASS  herdr                herdr 0.9.5 (min_herdr_version 0.7.5)</text>
+<text x="30" y="122" font-family="Menlo,monospace" font-size="13" fill="#9ece6a">  PASS  socket               reachable · 1 session</text>
+<text x="30" y="142" font-family="Menlo,monospace" font-size="13" fill="#9ece6a">  PASS  config               gs_restore install off, auto_install off · defaults intact</text>
+<text x="30" y="162" font-family="Menlo,monospace" font-size="13" fill="#7d7d8a">  SKIP  binary               dev build; no release version embedded</text>
+<text x="30" y="182" font-family="Menlo,monospace" font-size="13" fill="#9ece6a">  PASS  layouts              ~/.config/herdr/herdr-suite/layouts · 2 layouts</text>
+<text x="30" y="202" font-family="Menlo,monospace" font-size="13" fill="#9ece6a">  PASS  project              no .herdr declaration above ~/Projects/demo</text>
+<text x="30" y="222" font-family="Menlo,monospace" font-size="13" fill="#e0af68">  WARN  gs-restore reporter  holds no herdr reporter marker; run hs gs-restore install --force</text>
+<text x="30" y="242" font-family="Menlo,monospace" font-size="13" fill="#e0af68">  WARN  gs-restore version   no version marker in the installed file</text>
+<text x="30" y="262" font-family="Menlo,monospace" font-size="13" fill="#9ece6a">  PASS  gs-restore backup    none</text>
+<text x="30" y="282" font-family="Menlo,monospace" font-size="13" fill="#9ece6a">  PASS  gs-restore launcher  gentle-shell resolvable on PATH</text>
+<text x="30" y="302" font-family="Menlo,monospace" font-size="13" fill="#9ece6a">  PASS  manifest             herdr-plugin.toml · Herdr Suite 0.2.0</text>
+<text x="30" y="322" font-family="Menlo,monospace" font-size="13" fill="#7d7d8a">exit 0 · read-only · every FAIL names its fix</text>
+</svg>
