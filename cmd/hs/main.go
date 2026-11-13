@@ -12,6 +12,7 @@ import (
 	"github.com/WilberC/herdr-suite/internal/gsrestore"
 	"github.com/WilberC/herdr-suite/internal/herdrcli"
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
+	"github.com/WilberC/herdr-suite/internal/last"
 	"github.com/WilberC/herdr-suite/internal/layout"
 	"github.com/WilberC/herdr-suite/internal/pathshim"
 	"github.com/WilberC/herdr-suite/internal/session"
@@ -26,6 +27,7 @@ Commands:
   space           Save and restore herdr spaces
   gs-restore      Install the GS session-restore reporter (default off)
   path            Put hs on PATH for your shell
+  last            Toggle to the previous workspace or tab
   completions     Generate a shell completion script
   doctor          Report the health of this installation
   version         Print the version this binary was built as
@@ -120,6 +122,16 @@ var commands = []command{
 			{name: "install", summary: "Write the hs shim into your bin directory"},
 			{name: "remove", summary: "Delete the shim this command wrote"},
 			{name: "status", summary: "Report the shim, PATH and the plugin"},
+		},
+	},
+	{
+		name:    "last",
+		summary: "Toggle to the previous workspace or tab",
+		usage:   lastUsage,
+		subcommands: []subcommand{
+			{name: "workspace", summary: "Focus the previous workspace and swap back"},
+			{name: "tab", summary: "Focus the previous tab and swap back"},
+			{name: "observe", summary: "Record a focus event from the plugin hooks"},
 		},
 	},
 	{
@@ -288,6 +300,8 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 		return runGSRestore(d, args[1:])
 	case "path":
 		return runPath(d, args[1:])
+	case "last":
+		return runLast(d, args[1:])
 	case "completions":
 		return runCompletions(d, args[1:])
 	case "doctor":
@@ -473,6 +487,11 @@ func report(err error, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "hs: %s\n", shimRefusal.Reason)
 		return 2
 	}
+	var historyRefusal last.Refusal
+	if errors.As(err, &historyRefusal) {
+		fmt.Fprintf(stderr, "hs: %s\n", historyRefusal.Reason)
+		return 2
+	}
 	var stored layout.ExistsError
 	if errors.As(err, &stored) {
 		fmt.Fprintf(stderr, "hs: %v\n", err)
@@ -510,6 +529,11 @@ var groupUsage = map[string]map[string]string{
 		"install": pathInstallUsage,
 		"remove":  pathRemoveUsage,
 		"status":  pathStatusUsage,
+	},
+	"last": {
+		"workspace": lastWorkspaceUsage,
+		"tab":       lastTabUsage,
+		"observe":   lastObserveUsage,
 	},
 }
 

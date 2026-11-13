@@ -578,8 +578,8 @@ func TestPluginManifestKeepsTheExistingSurface(t *testing.T) {
 	if len(document.Panes) != 2 {
 		t.Fatalf("panes = %v, want the load and layouts panes unchanged", document.Panes)
 	}
-	if len(document.Events) != 0 {
-		t.Fatalf("events = %v, want none", document.Events)
+	if len(document.Events) != 2 {
+		t.Fatalf("events = %v, want only the two focus-history hooks", document.Events)
 	}
 }
 

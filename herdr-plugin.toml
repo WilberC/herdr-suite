@@ -12,7 +12,13 @@ build = [
   { command = ["bash", "bin/ensure-binary.sh", "--in-tree"] }
 ]
 
-events = []
+# Focus history for the two toggles: one ephemeral process per focus event writes
+# the id to a per-session state file and exits. There is no daemon, and nothing
+# is bound to a key until the user adds the two keybindings in docs/last.md.
+events = [
+  { on = "workspace.focused", command = ["bin/hs", "last", "observe"] },
+  { on = "tab.focused", command = ["bin/hs", "last", "observe"] },
+]
 
 # GS session restore is default off. The startup hook reads the plugin config
 # (gs_restore.install is the master gate, gs_restore.auto_install chooses install
@@ -39,6 +45,20 @@ title = "Install hs on PATH"
 description = "Write an update-safe shim into ~/.local/bin so hs works from your shell; then run hs path status"
 contexts = ["global"]
 command = ["bin/hs", "path", "install"]
+
+[[actions]]
+id = "last-workspace"
+title = "Toggle to the previous workspace"
+description = "Focus the workspace this session was on before the current one, and swap back"
+contexts = ["global"]
+command = ["bin/hs", "last", "workspace"]
+
+[[actions]]
+id = "last-tab"
+title = "Toggle to the previous tab"
+description = "Focus the tab this workspace was on before the current one, and swap back"
+contexts = ["global"]
+command = ["bin/hs", "last", "tab"]
 
 [[actions]]
 id = "save"

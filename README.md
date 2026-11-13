@@ -70,6 +70,7 @@ binary is built to run from scripts and plugin actions, not only from hands.
 | `hs space list` | every layout visible from here, with its scope | [spaces](docs/spaces.md#project-layouts) |
 | `hs gs-restore install\|remove\|status` | the gentle-shell reporter, default off | [gs-restore](docs/gs-restore.md) |
 | `hs path install\|remove\|status` | put `hs` on `PATH` with an update-safe shim | [install](docs/install.md#path) |
+| `hs last workspace\|tab` | toggle to the previous workspace or tab | [last](docs/last.md) |
 | `hs version [--check]` | the release this binary was built as, against the manifest | [health](docs/health.md) |
 | `hs doctor` | herdr, socket, config, binary and layout store in one pass | [health](docs/health.md) |
 | `hs completions fish` | print or install the fish completion script | [install](docs/install.md#shell-completions) |
@@ -83,6 +84,7 @@ binary is built to run from scripts and plugin actions, not only from hands.
 | [Spaces](docs/spaces.md) | save/load/show/list, the dry-run plan, `--replace`, project layouts, layout storage and forked layouts |
 | [GS session restore](docs/gs-restore.md) | the default-off gentle-shell reporter: toggles, install/remove/status, the single-reporter rule |
 | [Inside herdr](docs/inside-herdr.md) | the declared actions and panes, keybindings, how they resolve `bin/hs` |
+| [Last](docs/last.md) | the previous-workspace and previous-tab toggles, their ephemeral hooks and state file |
 | [Health](docs/health.md) | `hs version`, every `hs doctor` check, and the exit codes |
 | [Development](docs/development.md) | offline tests, `make` targets, the release flow and the repository layout |
 

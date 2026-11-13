@@ -64,7 +64,7 @@ session-restore files, and the plugin manifest itself.
 | --- | --- |
 | `0` | the operation succeeded, the user declined a confirmation, `hs version --check` found a matching version, or `hs doctor` reported no failure |
 | `1` | herdr failed, `hs version --check` found a stale binary, or `hs doctor` reported a `FAIL` line |
-| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, a layout name more than one place declares, a layout written by a newer `hs`, a `PI_CODING_AGENT_DIR` that is unset or is not a gentle-shell agent directory, a fish completion directory that neither `XDG_CONFIG_HOME` nor `HOME` names, or an `hs` in the bin directory that this tool did not write and `--force` did not authorize |
+| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, a layout name more than one place declares, a layout written by a newer `hs`, a `PI_CODING_AGENT_DIR` that is unset or is not a gentle-shell agent directory, a fish completion directory that neither `XDG_CONFIG_HOME` nor `HOME` names, an `hs` in the bin directory that this tool did not write and `--force` did not authorize, or a previous-workspace/tab toggle with no earlier id recorded |
 
 Inside herdr, the plugin exposes the same operations as the `save`, `load` and
 `list` actions — see [Inside herdr](inside-herdr.md).

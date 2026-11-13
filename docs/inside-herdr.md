@@ -4,7 +4,7 @@ Back to the [README](../README.md). The commands these actions run are in
 [Spaces](spaces.md), the install path in [Install](install.md), and the reporter
 toggle in [GS session restore](gs-restore.md).
 
-`herdr-plugin.toml` declares five actions and the two panes they open, anchored
+`herdr-plugin.toml` declares seven actions and the two panes they open, anchored
 to the `hs` binary in the plugin's own `bin/` directory — the layout herdr-bar
 uses for its release binary:
 
@@ -15,6 +15,8 @@ uses for its release binary:
 | `list` | the `layouts` pane: `bin/hs space list --pane`, keeping the table until enter is pressed |
 | `gs-install` | `bin/hs gs-restore install`, installing the GS session-restore reporter (default off) |
 | `hs-path` | `bin/hs path install`, writing the `hs` shim into `~/.local/bin` so `hs` works from a shell ([Install § PATH](install.md#path)) |
+| `last-workspace` | `bin/hs last workspace`, focusing the previous workspace ([Last](last.md)) |
+| `last-tab` | `bin/hs last tab`, focusing the previous tab ([Last](last.md)) |
 
 Bind them like any plugin action:
 
@@ -26,6 +28,13 @@ command = "herdr-suite.list"
 ```
 
 Action output lands in `herdr plugin log herdr-suite`.
+
+The same manifest declares two event hooks, `workspace.focused` and
+`tab.focused`, each running `bin/hs last observe`. Herdr runs them once per focus
+event; the command records the id in a per-session state file and exits, so no
+daemon stays resident. Nothing is bound by default: bind
+`herdr-suite.last-workspace` and `herdr-suite.last-tab` when you want the two
+toggles, as [Last](last.md) shows.
 
 The plugin's config file lives in the plugin config directory —
 `$HERDR_PLUGIN_CONFIG_DIR/config.json`, otherwise

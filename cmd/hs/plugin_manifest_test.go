@@ -27,6 +27,12 @@ type manifestPane struct {
 	Command   []string `json:"command"`
 }
 
+type manifestEvent struct {
+	On        string   `json:"on"`
+	Command   []string `json:"command"`
+	Platforms []string `json:"platforms"`
+}
+
 type pluginManifest struct {
 	ID              string           `json:"id"`
 	Name            string           `json:"name"`
@@ -37,7 +43,7 @@ type pluginManifest struct {
 	Actions         []manifestAction `json:"actions"`
 	Panes           []manifestPane   `json:"panes"`
 	Startup         []map[string]any `json:"startup"`
-	Events          []map[string]any `json:"events"`
+	Events          []manifestEvent  `json:"events"`
 }
 
 // manifestPath is the plugin manifest this repository ships.
@@ -184,6 +190,7 @@ var hsSubcommands = map[string]map[string]bool{
 	"session":    {"list": true, "create": true, "stop": true, "restart": true, "delete": true, "fork": true},
 	"gs-restore": {"install": true, "remove": true, "status": true, "startup": true},
 	"path":       {"install": true, "remove": true, "status": true},
+	"last":       {"workspace": true, "tab": true, "observe": true},
 }
 
 func usageFor(key string) string {
@@ -212,6 +219,14 @@ func usageFor(key string) string {
 		return pathRemoveUsage
 	case "path status":
 		return pathStatusUsage
+	case "last workspace":
+		return lastWorkspaceUsage
+	case "last tab":
+		return lastTabUsage
+	case "last observe":
+		return lastObserveUsage
+	case "last":
+		return lastUsage
 	case "path":
 		return pathUsage
 	case "session":
@@ -227,12 +242,15 @@ func TestPluginCommandsNameSubcommandsTheCLIHolds(t *testing.T) {
 		panes[pane.ID] = true
 	}
 
-	commands := make([][]string, 0, len(document.Actions)+len(document.Panes))
+	commands := make([][]string, 0, len(document.Actions)+len(document.Panes)+len(document.Events))
 	for _, action := range document.Actions {
 		commands = append(commands, action.Command)
 	}
 	for _, pane := range document.Panes {
 		commands = append(commands, pane.Command)
+	}
+	for _, event := range document.Events {
+		commands = append(commands, event.Command)
 	}
 
 	for _, command := range commands {
@@ -320,6 +338,74 @@ func TestPluginActionsPutHsOnPath(t *testing.T) {
 		return
 	}
 	t.Fatalf("manifest actions = %v, want the hs-path action", document.Actions)
+}
+
+// TestPluginEventsRecordFocusHistory pins the two hooks behind the toggles: the
+// focus events herdr emits, each running the ephemeral observer.
+func TestPluginEventsRecordFocusHistory(t *testing.T) {
+	document := parseManifest(t, readManifestBytes(t))
+
+	want := map[string]bool{"workspace.focused": true, "tab.focused": true}
+	seen := make(map[string]bool, len(document.Events))
+	for _, event := range document.Events {
+		if event.On == "" {
+			t.Fatalf("event %#v declares no kind", event)
+		}
+		if _, ok := want[event.On]; !ok {
+			t.Fatalf("event on = %q, want one of workspace.focused and tab.focused", event.On)
+		}
+		if seen[event.On] {
+			t.Fatalf("event on = %q is declared twice", event.On)
+		}
+		seen[event.On] = true
+		command := []string{"bin/hs", "last", "observe"}
+		if strings.Join(event.Command, " ") != strings.Join(command, " ") {
+			t.Fatalf("event on = %q command = %v, want %v", event.On, event.Command, command)
+		}
+	}
+	for kind := range want {
+		if !seen[kind] {
+			t.Fatalf("manifest events = %v, want the %q hook", document.Events, kind)
+		}
+	}
+}
+
+// TestPluginActionsToggleFocusHistory pins the two user-invoked toggles and the
+// suggestion that they stay unbindable: the manifest declares them, the user
+// binds them.
+func TestPluginActionsToggleFocusHistory(t *testing.T) {
+	document := parseManifest(t, readManifestBytes(t))
+
+	want := map[string][]string{
+		"last-workspace": {"bin/hs", "last", "workspace"},
+		"last-tab":       {"bin/hs", "last", "tab"},
+	}
+	titles := map[string]string{
+		"last-workspace": "Toggle to the previous workspace",
+		"last-tab":       "Toggle to the previous tab",
+	}
+	for _, action := range document.Actions {
+		command, ok := want[action.ID]
+		if !ok {
+			continue
+		}
+		if action.Title != titles[action.ID] {
+			t.Fatalf("action %s title = %q, want %q", action.ID, action.Title, titles[action.ID])
+		}
+		if action.Description == "" {
+			t.Fatalf("action %s declares no description", action.ID)
+		}
+		if len(action.Contexts) != 1 || action.Contexts[0] != "global" {
+			t.Fatalf("action %s contexts = %v, want [global]", action.ID, action.Contexts)
+		}
+		if strings.Join(action.Command, " ") != strings.Join(command, " ") {
+			t.Fatalf("action %s command = %v, want %v", action.ID, action.Command, command)
+		}
+		delete(want, action.ID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("manifest actions = %v, want %v", document.Actions, want)
+	}
 }
 
 func flagValue(fields []string, flag string) string {
