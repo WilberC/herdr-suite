@@ -45,11 +45,14 @@ Put the latest backup back in place of the reporter, or delete the reporter
 when no backup exists. A removal with nothing installed reports that and exits 0.
 `
 
-const gsRestoreStatusUsage = `usage: hs gs-restore status
+const gsRestoreStatusUsage = `usage: hs gs-restore status [options]
 
 Report whether the reporter is installed, whether its version marker matches
 this build, whether a backup exists, whether the gentle-shell launcher is
 resolvable, and the config toggle states.
+
+Options:
+  --json  Print the report as one JSON document carrying the same fields
 `
 
 const gsRestoreStartupUsage = `usage: hs gs-restore startup
@@ -152,10 +155,23 @@ func runGSRestoreRemove(d deps, args []string) int {
 }
 
 func runGSRestoreStatus(d deps, args []string) int {
-	if len(args) != 0 {
-		return report(usageError{reason: "status takes no arguments", usage: gsRestoreStatusUsage}, d.err)
+	jsonOutput := false
+	for _, arg := range args {
+		switch {
+		case arg == "--json":
+			jsonOutput = true
+		case strings.HasPrefix(arg, "-"):
+			return report(usageError{reason: fmt.Sprintf("unknown flag %q", arg), usage: gsRestoreStatusUsage}, d.err)
+		default:
+			return report(usageError{reason: "status takes no arguments", usage: gsRestoreStatusUsage}, d.err)
+		}
 	}
-	writeGSStatus(d.out, gsrestore.Inspect(d.getenv, d.lookPath), d.getenv)
+
+	status := gsrestore.Inspect(d.getenv, d.lookPath)
+	if jsonOutput {
+		return report(gsrestore.WriteJSON(d.out, status), d.err)
+	}
+	writeGSStatus(d.out, status, d.getenv)
 	return 0
 }
 

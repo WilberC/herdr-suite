@@ -14,6 +14,33 @@ func IsPath(reference string) bool {
 	return strings.ContainsRune(reference, '/') || strings.ContainsRune(reference, filepath.Separator)
 }
 
+// ScopePath is where a layout resolved by an explicit path lives: a file the
+// sources do not declare.
+const ScopePath = "path"
+
+// ScopeOf names where a resolved layout lives: the project declaration when the
+// file sits under the project's .herdr, the global store when it sits under that
+// directory, and ScopePath otherwise. It is what the show view prints beside the
+// layout name, so a reader sees which rule resolved the file.
+func ScopeOf(sources Sources, path string) string {
+	if sources.Global != "" && within(sources.Global, path) {
+		return ScopeGlobal
+	}
+	if sources.Project != "" && within(filepath.Dir(sources.Project), path) {
+		return ScopeProject
+	}
+	return ScopePath
+}
+
+// within reports whether path sits in dir or below it.
+func within(dir, path string) bool {
+	relative, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
 // AmbiguousError reports a name that more than one place declares.
 type AmbiguousError struct {
 	Name       string

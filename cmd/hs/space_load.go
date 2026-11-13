@@ -59,31 +59,11 @@ func runSpaceLoad(d deps, args []string) int {
 	if err != nil {
 		return report(err, d.err)
 	}
-	if !layout.IsPath(reference) {
-		name, err := session.SanitizeName(reference, "layout")
-		if err != nil {
-			return report(usageError{reason: err.Error(), usage: spaceLoadUsage}, d.err)
-		}
-		reference = name
-	}
-
-	sources, err := layoutSources(d, options.dir)
+	resolved, err := resolveStoredLayout(d, reference, options.dir, spaceLoadUsage)
 	if err != nil {
 		return report(err, d.err)
 	}
-	document, _, err := layout.Resolve(sources, reference)
-	if err != nil {
-		var missing layout.NotFoundError
-		if errors.As(err, &missing) {
-			return report(session.Refusal{Reason: fmt.Sprintf(
-				"unknown layout '%s'; create it with hs space save %s", reference, reference)}, d.err)
-		}
-		var ambiguous layout.AmbiguousError
-		if errors.As(err, &ambiguous) {
-			return report(session.Refusal{Reason: ambiguous.Error()}, d.err)
-		}
-		return report(err, d.err)
-	}
+	document := resolved.Document
 
 	ctx := context.Background()
 	target, err := sessionTarget(ctx, d, options.session, spaceLoadUsage)

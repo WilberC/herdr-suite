@@ -13,15 +13,36 @@ import (
 func Summary(document Layout, path string) string {
 	var report strings.Builder
 	fmt.Fprintf(&report, "saved layout '%s' at %s\n", document.Name, path)
+	writeSpaces(&report, document)
+	return report.String()
+}
 
+// Show renders the full view of one stored layout: where it lives and in which
+// scope, the schema it was read at, the timestamp the document records when it
+// carries one, and then the same workspace and tab lines the snapshot report
+// prints. It reads the document and nothing else, so showing a layout never
+// touches a session.
+func Show(document Layout, path, scope string) string {
+	var report strings.Builder
+	fmt.Fprintf(&report, "layout '%s' · %s · %s\n", document.Name, scope, path)
+	fmt.Fprintf(&report, "schema_version %d\n", document.SchemaVersion)
+	if document.CapturedAt != "" {
+		fmt.Fprintf(&report, "captured %s\n", document.CapturedAt)
+	}
+	writeSpaces(&report, document)
+	return report.String()
+}
+
+// writeSpaces prints the lines a layout shares between the snapshot report and
+// the show view: the session summary of a forked layout, then every workspace.
+func writeSpaces(report *strings.Builder, document Layout) {
 	spaces := document.Spaces()
 	if document.Multi() {
-		fmt.Fprintf(&report, "%s\n", sessionLine(document, spaces))
+		fmt.Fprintf(report, "%s\n", sessionLine(document, spaces))
 	}
 	for _, workspace := range spaces {
-		writeWorkspace(&report, workspace)
+		writeWorkspace(report, workspace)
 	}
-	return report.String()
 }
 
 // sessionLine is the header of a session layout: the session it was forked from

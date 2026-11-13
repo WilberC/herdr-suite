@@ -15,10 +15,11 @@ const spaceUsage = `usage: hs space <command>
 Commands:
   save <name>             Snapshot the active workspace as a layout
   load <name>             Recreate a stored layout in a workspace
+  show <name>             Print a stored layout without loading it
   list                    List the layouts visible from here
 
-Run "hs space save --help", "hs space load --help" or "hs space list --help"
-for their options.
+Run "hs space save --help", "hs space load --help", "hs space show --help" or
+"hs space list --help" for their options.
 
 A layout holds the workspace's tabs and each tab's split tree: split
 directions, ratios, pane labels, cwds and agent identifications. Layouts are
@@ -54,6 +55,8 @@ func runSpace(d deps, args []string) int {
 		return runSpaceSave(d, args[1:])
 	case "load":
 		return runSpaceLoad(d, args[1:])
+	case "show":
+		return runSpaceShow(d, args[1:])
 	case "list":
 		return runSpaceList(d, args[1:])
 	}

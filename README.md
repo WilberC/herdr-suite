@@ -12,6 +12,23 @@ The same Go binary serves both surfaces: a non-interactive CLI for scripts and
 herdr plugin actions that run inside herdr. Destructive operations require
 confirmation, and non-interactive commands keep stable exit codes and stdout.
 
+## Quick start
+
+```bash
+herdr plugin install WilberC/herdr-suite  # fetch the plugin; its build hook puts bin/hs in place
+hs version                                # the binary runs and names the release it was built as
+hs doctor                                 # herdr, socket, config, binary and layout store in one pass
+hs gs-restore install                     # optional: gentle-shell sessions come back through its launcher, then /reload in pi
+hs space save work                        # snapshot the active workspace as the layout "work"
+hs space load work                        # recreate that layout in the active workspace
+```
+
+`bin/hs` sits in the plugin root: put it on `PATH`, or run it from there, before
+the `hs` lines. Each step has its own section — [Install](#install),
+[Version and doctor](#version-and-doctor), [GS session
+restore](#gs-session-restore) and [Spaces](#spaces) — and [Shell
+completions](#shell-completions) covers the fish script.
+
 ## Status
 
 `hs` replaces `herdr-sessionizer`: the interactive switcher, the session
@@ -24,13 +41,18 @@ session forks and the plugin actions are implemented.
 - `hs space load` recreates a stored layout, in a workspace or as every
   workspace a fork captured.
 - `hs space list` lists the layouts visible from the current directory.
+- `hs space show` prints a stored layout — header, split trees, labels, cwds and
+  agents — without touching a session or loading it.
+- `hs completions fish` generates the fish completion script, and `--install`
+  writes it into fish's own completion directory.
 - `hs version` reports the build version, and `hs version --check` compares it
   with the manifest so a stale binary is caught; `hs doctor` reports the whole
   installation one line at a time.
 - `herdr-plugin.toml` declares the `save`, `load`, `list` and `gs-install`
   actions, the two panes the first three open, and the `gs-restore startup` hook.
 - `hs gs-restore` installs, removes and reports the GS session-restore reporter;
-  the feature is default off (see [GS session restore](#gs-session-restore)).
+  the feature is default off (see [GS session restore](#gs-session-restore)), and
+  `hs gs-restore status --json` prints that report as one document.
 - `internal/herdrmock` is the offline fake of the herdr surface used by tests.
 - `.github/workflows/release.yml` publishes the release binaries and their
   checksums on a `v*` tag, and `.github/workflows/ci.yml` gates every push.
@@ -65,10 +87,12 @@ mkdir -p bin && install -m 755 "$ASSET" bin/hs
 ```
 
 `SHA256SUMS` covers every asset, so the check reads only the line of the binary
-this machine downloaded. Nothing compiles and nothing is downloaded
-automatically yet: herdr's install runs no build step for this manifest, so the
-`bin/hs` the plugin actions run is the one placed above, or `make hs` in a
-working tree — see [Inside herdr](#inside-herdr).
+this machine downloaded. From this point herdr's `[[build]]` hook takes over:
+on `plugin install` (and update) `bin/ensure-binary.sh --in-tree` provisions
+`bin/hs` — local Go build first, prebuilt release binary as fallback — while
+`herdr plugin link` runs no build, so a working tree builds it with
+`make hs`; every action and pane expects exactly that path. See
+[Inside herdr](#inside-herdr).
 
 ## Usage
 
@@ -99,11 +123,18 @@ hs space list                   # NAME, SCOPE, WORKSPACE, TABS, PANES, MODIFIED
 hs space list --json            # {"layouts":[{"name","scope","workspace",...}]}
 hs space list --pane            # keep the table on screen until enter
 hs space list --dir ~/project   # discover from that directory instead
+hs space show work              # print a stored layout: header, tree, labels, cwds, agents
+hs space show work --json       # print the stored document instead
+hs space show ./hand/made.json  # resolve a layout file by path
+hs completions fish             # print the fish completion script
+hs completions fish --install   # write it to $XDG_CONFIG_HOME/fish/completions/hs.fish
 hs version                      # hs version 0.2.0, or hs version dev in a tree
 hs version --json               # {"version":"0.2.0"}
 hs version --check              # exit 1 when the binary is older than the manifest
 hs doctor                       # PASS/WARN/FAIL/SKIP lines; exit 1 on a FAIL
 hs doctor --json                # the whole report as one JSON document
+hs gs-restore status            # reporter, version marker, backup, launcher, toggles
+hs gs-restore status --json     # the same report as one JSON document
 ```
 
 Session names are sanitized before they reach herdr: whitespace runs become
@@ -117,6 +148,37 @@ the output is deterministic. `--json` mirrors the field names of
 Destructive commands ask for a confirmation when stdin is a terminal, and
 require `--yes` otherwise. Deleting stops the session first, because herdr only
 deletes stopped sessions, and the default session cannot be deleted at all.
+
+### Shell completions
+
+`hs completions fish` prints a fish completion script. It completes the command
+tree statically and asks `hs` itself for the live names — `hs session list
+--json` for session names, `hs space list --json` for layout names — so the
+completion offers exactly what the CLI resolves, project declarations included,
+instead of keeping a second copy of the rules.
+
+```bash
+hs completions fish            # print the script
+hs completions fish --install  # write it and print its path
+```
+
+`--install` writes `hs.fish` to `$XDG_CONFIG_HOME/fish/completions`, or
+`~/.config/fish/completions` when `XDG_CONFIG_HOME` is unset, and creates that
+directory when it does not exist, so the install is one command. With neither
+variable set it refuses and names the one to export rather than guessing a home
+directory. A new shell reads the file automatically; `complete -C 'hs space
+load '` reloads it in the current one.
+
+The script is generated from the CLI's own command table, never edited by hand:
+every command and subcommand the binary dispatches appears in it, a test reads
+that table to prove it, and regenerating after an upgrade is another `--install`.
+Session names complete for `hs attach` and `hs session
+create|stop|restart|delete|fork`; layout names complete for `hs space load` and
+`hs space show`; `hs space save` names a new layout, so it completes none. A
+herdr call that fails prints nothing, because both reads drop stderr: a
+completion must never write on the command line. A layout reference may be a
+path, so `hs space load` and `hs space show` keep fish's file completion beside
+the stored names.
 
 ### Spaces
 
@@ -142,6 +204,35 @@ pane w35:p7 · pi working · /home/wilber/dotfiles
 
 `--json` prints the snapshot document instead, so scripts and the load command
 share one machine-readable shape.
+
+### Showing a space
+
+`hs space show <name>` prints a stored layout without touching a session. The
+header names the layout, the scope that resolved it, the file it lives in and the
+schema version it was read at — plus the timestamp the document records, when it
+carries one. Then every workspace follows, tab by tab, with the same split-tree
+lines `hs space save` prints:
+
+```text
+layout 'work' · global · ~/.config/herdr/herdr-suite/layouts/work.json
+schema_version 1
+workspace 'dotfiles' · 1 tab · 2 panes
+tab 1 '1' · 2 panes · focus w35:p7
+split right 0.60
+├─ pane w35:p7 · 'editor' · pi working · /home/wilber/dotfiles
+└─ pane w35:p8 · /tmp
+```
+
+Resolution is the rule the whole CLI shares — explicit path, then the project
+declaration, then the global store — and the refusals are a load's refusals: an
+unknown layout, a name two places declare, and a layout a newer `hs` wrote print
+the same message and exit 2, so checking a layout before replaying it asks the
+question a replay would ask. `--json` prints the stored document instead, and
+`--dir <path>` discovers from that directory.
+
+The scope says which rule won: `global` for the store, `project` for a `.herdr/`
+declaration, and `path` for a file named by path. A layout written before the
+schema field existed reads at `schema_version 1` and prints it.
 
 ### Restoring a space
 
@@ -377,7 +468,15 @@ hs gs-restore install          # install or refresh the reporter
 hs gs-restore install --force  # replace a file that is not a herdr reporter
 hs gs-restore remove           # restore the latest backup, or delete the file
 hs gs-restore status           # reporter, version marker, backup, launcher, toggles
+hs gs-restore status --json    # the same report as one JSON document
 ```
+
+`status --json` prints one document carrying the same values as the human lines —
+`config_path` and `config_present`, `install` and `auto_install`, `agent_dir`,
+`reporter_path`, `reporter_present`, `reporter_installed`, `reporter_version`,
+`version_matches`, `shipped_version`, `backup` and `gentle_shell` — plus
+`config_error` and `agent_dir_error` when the environment does not provide the
+value, so a script reads the report without parsing its prose.
 
 An existing herdr pi integration is backed up next to the file before it is
 replaced, as `<name>.bak-<timestamp>`; repeated installs keep that single backup
@@ -508,7 +607,7 @@ session-restore files, and the plugin manifest itself.
 | --- | --- |
 | `0` | the operation succeeded, the user declined a confirmation, `hs version --check` found a matching version, or `hs doctor` reported no failure |
 | `1` | herdr failed, `hs version --check` found a stale binary, or `hs doctor` reported a `FAIL` line |
-| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, a layout name more than one place declares, a layout written by a newer `hs`, or a `PI_CODING_AGENT_DIR` that is unset or is not a gentle-shell agent directory |
+| `2` | bad arguments, an invalid name, a protected session, a missing confirmation, a missing layout, a layout name more than one place declares, a layout written by a newer `hs`, a `PI_CODING_AGENT_DIR` that is unset or is not a gentle-shell agent directory, or a fish completion directory that neither `XDG_CONFIG_HOME` nor `HOME` names |
 
 Inside herdr, the plugin exposes the same operations as the `save`, `load` and
 `list` actions.
@@ -571,6 +670,7 @@ such interpreter is installed.
 | `internal/herdrcli/` | the herdr client: the CLI calls, the topology snapshot, the layout mutations and the process replacement |
 | `internal/herdrmock/` | the herdr client interface and the offline fake |
 | `internal/layout/` | the layout schema, its storage directory, the snapshot report and the replay plan |
+| `internal/completions/` | the generated fish completion script and its install target |
 | `internal/gsrestore/` | the GS session-restore reporter install, config gate and status |
 | `internal/manifest/` | the plugin manifest fields the binary reports: the version and the herdr floor |
 | `internal/doctor/` | the read-only installation report behind `hs doctor` |

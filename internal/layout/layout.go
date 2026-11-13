@@ -31,8 +31,12 @@ type Layout struct {
 	Name          string
 	Session       string
 	SchemaVersion int
-	Workspace     Workspace
-	Workspaces    []Workspace
+	// CapturedAt is the timestamp a stored document records for the moment it
+	// was snapshotted. This build reads it and prints it in the show view; it
+	// does not write one, so a document saved here carries none.
+	CapturedAt string
+	Workspace  Workspace
+	Workspaces []Workspace
 }
 
 // storedDocument is the file form of a layout: exactly one of the two shapes is
@@ -44,6 +48,7 @@ type storedDocument struct {
 	SchemaVersion json.RawMessage `json:"schema_version,omitempty"`
 	Name          string          `json:"name"`
 	Session       string          `json:"session,omitempty"`
+	CapturedAt    string          `json:"captured_at,omitempty"`
 	Workspace     *Workspace      `json:"workspace,omitempty"`
 	Workspaces    []Workspace     `json:"workspaces,omitempty"`
 }
@@ -55,6 +60,7 @@ func (l Layout) MarshalJSON() ([]byte, error) {
 		SchemaVersion: json.RawMessage(strconv.Itoa(CurrentSchema)),
 		Name:          l.Name,
 		Session:       l.Session,
+		CapturedAt:    l.CapturedAt,
 	}
 	if len(l.Workspaces) > 0 {
 		document.Workspaces = l.Workspaces
@@ -87,6 +93,7 @@ func (l *Layout) UnmarshalJSON(data []byte) error {
 	l.Name = document.Name
 	l.Session = document.Session
 	l.SchemaVersion = schemaVersion
+	l.CapturedAt = document.CapturedAt
 	l.Workspace = Workspace{}
 	l.Workspaces = document.Workspaces
 	if document.Workspace != nil {

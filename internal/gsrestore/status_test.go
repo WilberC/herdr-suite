@@ -1,9 +1,12 @@
 package gsrestore
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -109,5 +112,63 @@ func TestInspectFindsTheLatestBackup(t *testing.T) {
 	status := Inspect(getenv, noGentleShell)
 	if status.Backup != result.Backup {
 		t.Fatalf("Backup = %q, want %q", status.Backup, result.Backup)
+	}
+}
+
+func TestDocumentCarriesEveryFieldTheReportPrints(t *testing.T) {
+	target := testTarget(t)
+	if _, err := Install(target, reporterFixture(), false, time.Now()); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	getenv := envFrom(map[string]string{"PI_CODING_AGENT_DIR": target.AgentDir})
+
+	status := Inspect(getenv, noGentleShell)
+	document := status.Document()
+
+	if document.AgentDir != target.AgentDir || document.AgentDirError != "" {
+		t.Fatalf("agent dir fields = %#v, want %q", document, target.AgentDir)
+	}
+	if document.ReporterPath != target.Path || !document.ReporterPresent || !document.ReporterInstalled {
+		t.Fatalf("reporter fields = %#v, want the installed reporter", document)
+	}
+	if document.ReporterVersion != "v1" || !document.VersionMatches {
+		t.Fatalf("version fields = %#v, want the shipped marker", document)
+	}
+	if document.ShippedVersion != ReporterVersion() {
+		t.Fatalf("ShippedVersion = %q, want %q", document.ShippedVersion, ReporterVersion())
+	}
+	if document.Install || document.AutoInstall {
+		t.Fatalf("toggles = %#v, want both off", document)
+	}
+}
+
+func TestDocumentRecordsAnUnresolvableAgentDirAsAField(t *testing.T) {
+	status := Inspect(envFrom(map[string]string{}), noGentleShell)
+
+	document := status.Document()
+	if document.AgentDirError == "" {
+		t.Fatal("AgentDirError = empty, want the missing agent dir reported instead of dropped")
+	}
+	if document.AgentDir != "" || document.ReporterInstalled {
+		t.Fatalf("document = %#v, want an unknown agent dir without a reporter", document)
+	}
+}
+
+func TestWriteJSONPrintsOneDocument(t *testing.T) {
+	var buf bytes.Buffer
+	status := Inspect(envFrom(map[string]string{}), noGentleShell)
+
+	if err := WriteJSON(&buf, status); err != nil {
+		t.Fatalf("WriteJSON error = %v", err)
+	}
+	if got := strings.Count(strings.TrimSpace(buf.String()), "\n"); got != 0 {
+		t.Fatalf("WriteJSON printed %d newlines, want one document:\n%s", got, buf.String())
+	}
+	var document map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &document); err != nil {
+		t.Fatalf("WriteJSON output is not JSON: %v\n%s", err, buf.String())
+	}
+	if _, ok := document["shipped_version"]; !ok {
+		t.Fatalf("document has no shipped_version:\n%s", buf.String())
 	}
 }

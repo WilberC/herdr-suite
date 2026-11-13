@@ -24,6 +24,7 @@ Commands:
   session         Manage herdr sessions
   space           Save and restore herdr spaces
   gs-restore      Install the GS session-restore reporter (default off)
+  completions     Generate a shell completion script
   doctor          Report the health of this installation
   version         Print the version this binary was built as
 
@@ -56,6 +57,16 @@ type command struct {
 	name    string
 	summary string
 	usage   string
+	// subcommands are the names the command dispatches itself. The completion
+	// script is generated from them, so a subcommand cannot be dispatched
+	// without also being offered by the shell.
+	subcommands []subcommand
+}
+
+// subcommand is one name a command group dispatches.
+type subcommand struct {
+	name    string
+	summary string
 }
 
 var commands = []command{
@@ -68,16 +79,41 @@ var commands = []command{
 		name:    "session",
 		summary: "Manage herdr sessions",
 		usage:   sessionUsage,
+		subcommands: []subcommand{
+			{name: "list", summary: "List sessions as a stable table, or as JSON"},
+			{name: "create", summary: "Create a session by attaching it"},
+			{name: "stop", summary: "Stop a session"},
+			{name: "restart", summary: "Stop a session so the next attach starts it fresh"},
+			{name: "delete", summary: "Stop and delete a session"},
+			{name: "fork", summary: "Snapshot a session as one layout"},
+		},
 	},
 	{
 		name:    "space",
 		summary: "Save and restore herdr spaces",
 		usage:   spaceUsage,
+		subcommands: []subcommand{
+			{name: "save", summary: "Snapshot the active workspace as a layout"},
+			{name: "load", summary: "Recreate a stored layout in a workspace"},
+			{name: "show", summary: "Print a stored layout without loading it"},
+			{name: "list", summary: "List the layouts visible from here"},
+		},
 	},
 	{
 		name:    "gs-restore",
 		summary: "Install the GS session-restore reporter",
 		usage:   gsRestoreUsage,
+		subcommands: []subcommand{
+			{name: "install", summary: "Install the GS session-restore reporter"},
+			{name: "remove", summary: "Restore the previous reporter, or remove ours"},
+			{name: "status", summary: "Report the reporter, the backup and the config toggles"},
+			{name: "startup", summary: "Apply the config gate at server start"},
+		},
+	},
+	{
+		name:    "completions",
+		summary: "Generate a shell completion script",
+		usage:   completionsUsage,
 	},
 	{
 		name:    "doctor",
@@ -238,6 +274,8 @@ func runWith(d deps, args []string, stdout, stderr io.Writer) int {
 		return runSpace(d, args[1:])
 	case "gs-restore":
 		return runGSRestore(d, args[1:])
+	case "completions":
+		return runCompletions(d, args[1:])
 	case "doctor":
 		return runDoctor(d, args[1:])
 	case "version":
@@ -437,6 +475,7 @@ var groupUsage = map[string]map[string]string{
 	"space": {
 		"save": spaceSaveUsage,
 		"load": spaceLoadUsage,
+		"show": spaceShowUsage,
 		"list": spaceListUsage,
 	},
 	"session": {

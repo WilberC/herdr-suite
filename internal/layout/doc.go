@@ -17,8 +17,8 @@
 // workspace of that session. A workspace holds tabs, and a tab holds a split
 // tree:
 //
-//	Layout  { schema_version: 1, name, session?, workspace }            single-workspace form
-//	Layout  { schema_version: 1, name, session?, workspaces[] }         session form
+//	Layout  { schema_version: 1, name, session?, captured_at?, workspace }   single-workspace form
+//	Layout  { schema_version: 1, name, session?, captured_at?, workspaces[] } session form
 //	Workspace { label, tabs[] }
 //	Tab     { label?, focused, focused_pane_id?, root }
 //	Node    { type: "pane" }  pane_id?, label?, cwd?, agent?
@@ -46,6 +46,12 @@
 // byte-for-byte as it was; the next save writes the field, and that field is the
 // only difference a saved legacy document gains. Saving a document this build
 // read and saving it again therefore produces identical bytes.
+//
+// A document may also record captured_at, the moment it was snapshotted. This
+// build reads the field and prints it in the show view; it writes none, so a
+// document saved here carries no timestamp and the show view leaves the line
+// out. The field is additive: a document that names it still reads on a build
+// that does not, and the schema version does not move for it.
 //
 // A split is binary and ordered: first is the left or top child of a "right" or
 // "down" split, exactly as herdr reports it, and ratio is the share first takes.
@@ -88,6 +94,16 @@
 // candidate and its scope, because picking one silently would load a layout the
 // caller did not name. List prints the same sources in the same order, so what a
 // listing showed is what a load resolves.
+//
+// # Showing
+//
+// Show reads a resolved layout and prints it without touching a session: the
+// name, the scope ScopeOf gives its file, the file itself, the schema version it
+// was read at and, when the document records one, its captured_at. Then come the
+// same workspace and split-tree lines Summary prints, so the two views cannot
+// describe one layout differently. Show resolves nothing itself: the command
+// resolves the reference with Resolve first, which keeps the refusal for a
+// missing, ambiguous or newer layout identical to a load's.
 //
 // # Replay
 //

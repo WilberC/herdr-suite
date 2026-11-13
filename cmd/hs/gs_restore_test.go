@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -610,5 +611,149 @@ func TestGSRestoreStartupStaysOffWithAnInvalidConfig(t *testing.T) {
 	}
 	if !strings.Contains(run.stderr.String(), "stays off") {
 		t.Fatalf("stderr = %q, want a brief line explaining the feature stays off", run.stderr)
+	}
+}
+
+// TestGSRestoreStatusPrintsTheReportAsJSON pins the machine-readable form of the
+// report: one document carrying every value the human lines print.
+func TestGSRestoreStatusPrintsTheReportAsJSON(t *testing.T) {
+	run := newGSRun(t)
+	if code := run.run(t, "gs-restore", "install"); code != 0 {
+		t.Fatalf("install exit = %d\n%s", code, run.stderr)
+	}
+	run.stdout.Reset()
+	run.writeConfig(t, `{"gs_restore": {"install": true, "auto_install": true}}`)
+
+	code := run.run(t, "gs-restore", "status", "--json")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	if run.stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", run.stderr.String())
+	}
+	var document gsrestore.StatusDocument
+	if err := json.Unmarshal(run.stdout.Bytes(), &document); err != nil {
+		t.Fatalf("stdout is not the status document: %v\n%s", err, run.stdout)
+	}
+	if !strings.Contains(run.stdout.String(), "\n") || len(strings.Split(strings.TrimSpace(run.stdout.String()), "\n")) != 1 {
+		t.Fatalf("stdout = %q, want one JSON document", run.stdout.String())
+	}
+
+	if document.ConfigPath != run.configPath() || !document.ConfigPresent || document.ConfigError != "" {
+		t.Fatalf("config fields = %#v, want the present config at %s", document, run.configPath())
+	}
+	if !document.Install || !document.AutoInstall {
+		t.Fatalf("toggles = install %v, auto_install %v, want both on", document.Install, document.AutoInstall)
+	}
+	if document.AgentDir != run.agentDir || document.AgentDirError != "" {
+		t.Fatalf("agent dir fields = %#v, want %s", document, run.agentDir)
+	}
+	if document.ReporterPath != run.reporterPath() || !document.ReporterPresent || !document.ReporterInstalled {
+		t.Fatalf("reporter fields = %#v, want the installed reporter at %s", document, run.reporterPath())
+	}
+	if document.ReporterVersion != "v1" || !document.VersionMatches {
+		t.Fatalf("version fields = %#v, want the shipped v1", document)
+	}
+	if document.ShippedVersion != gsrestore.ReporterVersion() {
+		t.Fatalf("ShippedVersion = %q, want %q", document.ShippedVersion, gsrestore.ReporterVersion())
+	}
+	if document.Backup != "" || document.GentleShell != "" {
+		t.Fatalf("document = %#v, want no backup and no launcher", document)
+	}
+}
+
+// TestGSRestoreStatusJSONMirrorsTheHumanReport keeps the two surfaces in step:
+// every field the human report prints has the same value in the document.
+func TestGSRestoreStatusJSONMirrorsTheHumanReport(t *testing.T) {
+	run := newGSRun(t)
+
+	if code := run.run(t, "gs-restore", "status"); code != 0 {
+		t.Fatalf("status exit = %d\n%s", code, run.stderr)
+	}
+	human := run.stdout.String()
+	run.stdout.Reset()
+
+	if code := run.run(t, "gs-restore", "status", "--json"); code != 0 {
+		t.Fatalf("status --json exit = %d\n%s", code, run.stderr)
+	}
+	var document gsrestore.StatusDocument
+	if err := json.Unmarshal(run.stdout.Bytes(), &document); err != nil {
+		t.Fatalf("stdout is not the status document: %v\n%s", err, run.stdout)
+	}
+
+	lines := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(human), "\n") {
+		label, value, ok := strings.Cut(line, ":")
+		if !ok {
+			t.Fatalf("human line %q holds no label", line)
+		}
+		lines[strings.TrimSpace(label)] = strings.TrimSpace(value)
+	}
+
+	checks := []struct {
+		label string
+		ok    bool
+		want  bool
+	}{
+		{label: "install", ok: document.Install, want: lines["install"] == "on"},
+		{label: "auto-install", ok: document.AutoInstall, want: lines["auto-install"] == "on"},
+		{label: "config", ok: document.ConfigPresent, want: strings.HasSuffix(lines["config"], "(present)")},
+		{label: "reporter", ok: document.ReporterInstalled, want: strings.HasPrefix(lines["reporter"], "installed at "+document.ReporterPath)},
+		{label: "version", ok: document.VersionMatches, want: strings.HasPrefix(lines["version"], "matches")},
+	}
+	for _, check := range checks {
+		if check.ok != check.want {
+			t.Fatalf("%s: document says %v, human line %q says otherwise", check.label, check.ok, lines[check.label])
+		}
+	}
+	if got, want := lines["agent dir"], document.AgentDir; got != want {
+		t.Fatalf("agent dir = %q, document says %q", got, want)
+	}
+	if document.Backup != "" || lines["backup"] != "none" {
+		t.Fatalf("backup = %q, human line = %q, want none", document.Backup, lines["backup"])
+	}
+	if document.GentleShell != "" || lines["gentle-shell"] != "not resolvable" {
+		t.Fatalf("gentle-shell = %q, human line = %q, want unresolved", document.GentleShell, lines["gentle-shell"])
+	}
+}
+
+func TestGSRestoreStatusRejectsBadArguments(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "an unknown flag",
+			args: []string{"gs-restore", "status", "--bogus"},
+			want: `unknown flag "--bogus"`,
+		},
+		{
+			name: "a positional argument",
+			args: []string{"gs-restore", "status", "extra"},
+			want: "status takes no arguments",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := newGSRun(t)
+
+			code := run.run(t, tt.args...)
+
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2\nstdout:\n%s\nstderr:\n%s", code, run.stdout, run.stderr)
+			}
+			if !strings.Contains(run.stderr.String(), tt.want) {
+				t.Fatalf("stderr = %q, want it to contain %q", run.stderr.String(), tt.want)
+			}
+			if !strings.Contains(run.stderr.String(), "usage: hs gs-restore status") {
+				t.Fatalf("stderr = %q, want the status usage", run.stderr.String())
+			}
+			if run.stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", run.stdout.String())
+			}
+		})
 	}
 }
