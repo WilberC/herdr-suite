@@ -630,15 +630,15 @@ func (p *layoutPicker) choosingRows(panel frame.Frame) ([]pickerRow, int) {
 			content := roles.Pad(roles.Name.Render(entry.Name), nameWidth)
 			content += roles.Gap(2) + roles.Pad(roles.Muted.Render(entry.Workspace), workspaceWidth)
 			content += roles.Gap(2) + roles.Pad(roles.Muted.Render(count), countWidth)
+			row := list.Entry{Roles: roles, Last: last, Description: content, ID: session.RowZone(i)}
 			if when != "" {
-				// The age ends one cell short of the row's edge. It is aligned inside
-				// the room list.Entry leaves the description -- the row minus the tree
-				// guide it draws -- measured with list.Row, so the prompt derives that
-				// room from the kit instead of holding its own copy of the indent.
-				room := inner - text.Width(list.Row(roles, last, ""))
-				content = roles.AlignRight(content, roles.Muted.Render(when)+roles.Gap(1), room)
+				// The age is the row's trailing column, one cell of the row's own
+				// background after it, so it ends one cell short of the row's edge and
+				// the kit owns the gutter between it and the counts.
+				row.Trailing = roles.Muted.Render(when)
+				row.TrailingWidth = text.Width(when) + 1
 			}
-			return list.Entry{Roles: roles, Last: last, Description: content, ID: session.RowZone(i)}
+			return row
 		}})
 		if i == p.cursor {
 			cursorAt = len(rows) - 1

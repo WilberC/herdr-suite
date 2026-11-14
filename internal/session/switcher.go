@@ -461,13 +461,6 @@ func (s *switcher) View() string {
 	for i, row := range rows {
 		y := surface.BodyY(i)
 		lines[i] = surface.Row(width, s.paintRow(row, inner, nameWidth, zones, y))
-		if row.session == nil && row.match >= 0 {
-			// A workspace row is the session's detail, so a click on it selects the
-			// session it belongs to. list.Entry places a row under its own guide,
-			// never under a parent's continuation column, so this is the one row the
-			// switcher places in the tree itself.
-			zones.Add(ChildZone(row.match), 0, y, inner, 1)
-		}
 	}
 	return surface.PopupZones(width, height, lines, zones)
 }
@@ -643,13 +636,15 @@ func (s *switcher) filterContent(width int) string {
 // bodyRow is one row of the list before it is painted: the match a click on it
 // selects (-1 for a row that selects nothing), the session whose name it draws
 // (nil for a row that is already styled), the guide its place in the group asks
-// for, and the content of a row that is not a session.
+// for, whether the row it hangs under closes its group, and the content of a
+// row that is not a session.
 type bodyRow struct {
-	match    int
-	selected bool
-	session  *herdrmock.Session
-	last     bool
-	content  string
+	match      int
+	selected   bool
+	session    *herdrmock.Session
+	last       bool
+	parentLast bool
+	content    string
 }
 
 // bodyRows renders the grouped list: a header per state, one row per session,
@@ -692,17 +687,13 @@ func (s *switcher) bodyRows(width int) []bodyRow {
 		if i != s.cursor {
 			continue
 		}
-		// The children hang under their session: the continuation column keeps
-		// the parent's guide open, or leaves it blank when the session closes
-		// its group, so a child always starts three cells past its parent.
-		continuation := "  " + " " + "  "
-		if !last {
-			continuation = "  " + theme.Quiet.Render("│") + "  "
-		}
 		// A nested row is the session's detail, so a click on it acts on the
-		// session it belongs to.
-		for _, child := range s.workspaceLines(continuation, width) {
+		// session it belongs to. The row draws the parent's continuation column
+		// from the parent's place in the group, so it always starts five cells
+		// past its parent.
+		for _, child := range s.workspaceLines(width) {
 			child.match = i
+			child.parentLast = last
 			rows = append(rows, child)
 		}
 	}
@@ -712,11 +703,24 @@ func (s *switcher) bodyRows(width int) []bodyRow {
 // paintRow draws one body row with the roles its state asks for: the selected row
 // keeps the selection's tint, the row under the pointer wears the fainter one, and
 // the selection wins where both apply. Only a session row can wear either, because
-// the rows nested under it are facts about it, not targets of their own, so they
-// are drawn as they were composed and record no row zone of their own.
+// the rows nested under it are facts about it, not targets of their own: they stay
+// panel-roled, but they record their own zone so a click on one acts on the session
+// it belongs to.
 func (s *switcher) paintRow(row bodyRow, width, nameWidth int, zones *zone.Map, y int) string {
 	if row.session == nil {
-		return row.content
+		if row.match < 0 {
+			return row.content
+		}
+		return list.Entry{
+			Roles:       list.RowRoles(false),
+			Last:        row.last,
+			Parent:      &list.Parent{Last: row.parentLast},
+			Description: row.content,
+			Width:       width,
+			ID:          ChildZone(row.match),
+			Zones:       zones,
+			Y:           y,
+		}.Render()
 	}
 	roles := list.RowRolesFor(list.State{
 		Selected: row.selected,
@@ -767,14 +771,12 @@ func defaultMark(roles list.Roles, session herdrmock.Session) string {
 }
 
 // workspaceLines renders the highlighted session's workspaces as the rows
-// nested under it, with the counts and the agent state in fixed columns.
-func (s *switcher) workspaceLines(continuation string, width int) []bodyRow {
+// nested under it, with the counts and the agent state in fixed columns. A row
+// carries its own description only: list.Entry draws the guide that places it.
+func (s *switcher) workspaceLines(width int) []bodyRow {
 	rows := make([]bodyRow, 0, len(s.previewWorkspaces)+1)
-	guide := func(last bool) string {
-		return continuation + list.Guide(theme.Quiet, last) + " "
-	}
 	line := func(last bool, content string) bodyRow {
-		return bodyRow{match: -1, content: guide(last) + content}
+		return bodyRow{match: -1, last: last, content: content}
 	}
 
 	session, ok := s.highlighted()
