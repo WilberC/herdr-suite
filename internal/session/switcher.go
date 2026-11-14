@@ -459,8 +459,15 @@ func (s *switcher) View() string {
 	nameWidth := max(8, inner-24)
 	lines := make([]string, len(rows))
 	for i, row := range rows {
-		lines[i] = surface.Row(width, s.paintRow(row, inner, nameWidth))
-		s.recordRow(zones, row, surface, i)
+		y := surface.BodyY(i)
+		lines[i] = surface.Row(width, s.paintRow(row, inner, nameWidth, zones, y))
+		if row.session == nil && row.match >= 0 {
+			// A workspace row is the session's detail, so a click on it selects the
+			// session it belongs to. list.Entry places a row under its own guide,
+			// never under a parent's continuation column, so this is the one row the
+			// switcher places in the tree itself.
+			zones.Add(ChildZone(row.match), 0, y, inner, 1)
+		}
 	}
 	return surface.PopupZones(width, height, lines, zones)
 }
@@ -473,21 +480,6 @@ func (s *switcher) frameZones() *zone.Map {
 	}
 	s.zones.Reset()
 	return s.zones
-}
-
-// recordRow registers the cells of one drawn body row: a session row under its
-// own id, and a row nested under a session as that session's child, so a click on
-// a workspace selects the session it belongs to. A row the body had no room for
-// is not drawn, so it is not registered and cannot be clicked.
-func (s *switcher) recordRow(zones *zone.Map, row bodyRow, surface frame.Surface, line int) {
-	if row.match < 0 {
-		return
-	}
-	id := RowZone(row.match)
-	if row.session == nil {
-		id = ChildZone(row.match)
-	}
-	zones.Add(id, 0, surface.BodyY(line), surface.Frame.ContentWidth(), 1)
 }
 
 // handleMouse is the mouse half of S8: a press selects the row it landed on, a
@@ -720,31 +712,26 @@ func (s *switcher) bodyRows(width int) []bodyRow {
 // paintRow draws one body row with the roles its state asks for: the selected row
 // keeps the selection's tint, the row under the pointer wears the fainter one, and
 // the selection wins where both apply. Only a session row can wear either, because
-// the rows nested under it are facts about it, not targets of their own.
-func (s *switcher) paintRow(row bodyRow, width, nameWidth int) string {
-	roles := list.RowRolesFor(list.State{
-		Selected: row.selected,
-		Hovered:  row.session != nil && !row.selected && row.match+1 == s.hover,
-	})
+// the rows nested under it are facts about it, not targets of their own, so they
+// are drawn as they were composed and record no row zone of their own.
+func (s *switcher) paintRow(row bodyRow, width, nameWidth int, zones *zone.Map, y int) string {
 	if row.session == nil {
-		if roles.Selected {
-			return list.SelectedRow(row.content, width)
-		}
-		if roles.Hovered {
-			return roles.Pad(row.content, width)
-		}
 		return row.content
 	}
-
+	roles := list.RowRolesFor(list.State{
+		Selected: row.selected,
+		Hovered:  !row.selected && row.match+1 == s.hover,
+	})
 	body := roles.Name.Render(text.Clip(row.session.Name, nameWidth)) + defaultMark(roles, *row.session)
-	line := list.Row(roles, row.last, body)
-	switch {
-	case roles.Selected:
-		return list.SelectedRow(line, width)
-	case roles.Hovered:
-		return roles.Pad(line, width)
-	}
-	return line
+	return list.Entry{
+		Roles:       roles,
+		Last:        row.last,
+		Description: body,
+		Width:       width,
+		ID:          RowZone(row.match),
+		Zones:       zones,
+		Y:           y,
+	}.Render()
 }
 
 // countState counts the matches in one state group.

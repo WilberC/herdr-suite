@@ -202,8 +202,7 @@ func (p *workspacePicker) View() string {
 	rows := pickerWindowRows(p.bodyRows(panel), p.cursor, surface.BodyRows(height))
 	body := make([]string, len(rows))
 	for i, row := range rows {
-		body[i] = surface.Row(width, paintPickerRow(row, p.rowState(row.index), inner))
-		recordPickerRow(zones, row, surface, i)
+		body[i] = surface.Row(width, paintPickerRow(row, p.rowState(row.index), inner, zones, surface.BodyY(i)))
 	}
 	return surface.PopupZones(width, height, body, zones)
 }
@@ -234,7 +233,7 @@ func (p *workspacePicker) bodyRows(surface frame.Frame) []pickerRow {
 	rows := make([]pickerRow, 0, len(p.workspaces))
 	for i, workspace := range p.workspaces {
 		workspace, last := workspace, i == len(p.workspaces)-1
-		rows = append(rows, pickerRow{index: i, paint: func(roles list.Roles) string {
+		rows = append(rows, pickerRow{index: i, cells: func(roles list.Roles) list.Entry {
 			content := roles.Pad(roles.Name.Render(workspace.Label), labelWidth)
 			content += roles.Gap(2) + roles.Pad(roles.Muted.Render(counts[i]), countWidth)
 			if agent := roles.AgentState(workspace.AgentState); agent != "" {
@@ -243,7 +242,7 @@ func (p *workspacePicker) bodyRows(surface frame.Frame) []pickerRow {
 			if workspace.Focused {
 				content += roles.Gap(2) + roles.Gold.Render(text.Mark)
 			}
-			return list.Row(roles, last, content)
+			return list.Entry{Roles: roles, Last: last, Description: content, ID: session.RowZone(i)}
 		}})
 	}
 	return rows
@@ -578,8 +577,7 @@ func (p *layoutPicker) choosingView(surface frame.Surface, width, height int) st
 	visible := pickerWindowRows(rows, cursorAt, surface.BodyRows(height))
 	body := make([]string, len(visible))
 	for i, row := range visible {
-		body[i] = surface.Row(width, paintPickerRow(row, p.rowState(row.index), inner))
-		recordPickerRow(zones, row, surface, i)
+		body[i] = surface.Row(width, paintPickerRow(row, p.rowState(row.index), inner, zones, surface.BodyY(i)))
 	}
 	return surface.PopupZones(width, height, body, zones)
 }
@@ -619,24 +617,28 @@ func (p *layoutPicker) choosingRows(panel frame.Frame) ([]pickerRow, int) {
 			// The body opens with its own blank row, so only the groups after the
 			// first one get a separator row, the same rhythm the switcher uses.
 			if scope != "" {
-				rows = append(rows, pickerRow{index: -1, paint: func(list.Roles) string { return "" }})
+				rows = append(rows, pickerRow{index: -1, line: ""})
 			}
 			scope = entry.Scope
 			section := list.Section(scope, countScope(p.entries, scope))
-			rows = append(rows, pickerRow{index: -1, paint: func(list.Roles) string { return section }})
+			rows = append(rows, pickerRow{index: -1, line: section})
 		}
 
 		entry, last := entry, i == len(p.entries)-1 || p.entries[i+1].Scope != entry.Scope
 		count, when := counts[i], text.RelativeTime(time.Now(), entry.Modified)
-		rows = append(rows, pickerRow{index: i, paint: func(roles list.Roles) string {
+		rows = append(rows, pickerRow{index: i, cells: func(roles list.Roles) list.Entry {
 			content := roles.Pad(roles.Name.Render(entry.Name), nameWidth)
 			content += roles.Gap(2) + roles.Pad(roles.Muted.Render(entry.Workspace), workspaceWidth)
 			content += roles.Gap(2) + roles.Pad(roles.Muted.Render(count), countWidth)
-			line := list.Row(roles, last, content)
 			if when != "" {
-				line = roles.AlignRight(line, roles.Muted.Render(when)+roles.Gap(1), inner)
+				// The age ends one cell short of the row's edge. It is aligned inside
+				// the room list.Entry leaves the description -- the row minus the tree
+				// guide it draws -- measured with list.Row, so the prompt derives that
+				// room from the kit instead of holding its own copy of the indent.
+				room := inner - text.Width(list.Row(roles, last, ""))
+				content = roles.AlignRight(content, roles.Muted.Render(when)+roles.Gap(1), room)
 			}
-			return line
+			return list.Entry{Roles: roles, Last: last, Description: content, ID: session.RowZone(i)}
 		}})
 		if i == p.cursor {
 			cursorAt = len(rows) - 1
@@ -817,26 +819,33 @@ func spaceSurface(width int) frame.Surface {
 }
 
 // pickerRow is one row of a prompt's body before it is painted: the entry a click
-// on it selects (-1 for a row that selects nothing, a group header or a blank) and
-// how it draws itself for the roles its state asks for.
+// on it selects (-1 for a row that selects nothing) and the cells it draws. A
+// selectable row is a list.Entry, so the kit records its zone; a row that selects
+// nothing — a group header, a separator, a placeholder — is the line the prompt
+// composed, drawn as it is.
 type pickerRow struct {
 	index int
-	paint func(list.Roles) string
+	// cells composes a selectable row: where list.Entry places it in its group and
+	// the cells it carries. The painter fills in the width, the zone map and the
+	// row it lands on, because those depend on the body the surface gave it.
+	cells func(roles list.Roles) list.Entry
+	// line is a row that selects nothing and is drawn exactly as composed.
+	line string
 }
 
 // paintPickerRow draws one body row with the roles its state asks for: the
 // selected row keeps the selection's tint, the row under the pointer wears the
-// fainter one, and the selection wins where both apply.
-func paintPickerRow(row pickerRow, state list.State, width int) string {
-	roles := list.RowRolesFor(state)
-	line := row.paint(roles)
-	switch {
-	case roles.Selected:
-		return list.SelectedRow(line, width)
-	case roles.Hovered:
-		return roles.Pad(line, width)
+// fainter one, and the selection wins where both apply. A selectable row is
+// rendered through list.Entry, which also records it in zones at (0, y).
+func paintPickerRow(row pickerRow, state list.State, width int, zones *zone.Map, y int) string {
+	if row.cells == nil {
+		return row.line
 	}
-	return line
+	entry := row.cells(list.RowRolesFor(state))
+	entry.Width = width
+	entry.Zones = zones
+	entry.Y = y
+	return entry.Render()
 }
 
 // pickerPointer is the mouse state the two space prompts share: the row the
@@ -896,16 +905,6 @@ func wheelStep(button tea.MouseButton) (int, bool) {
 		return 1, true
 	}
 	return 0, false
-}
-
-// recordPickerRow registers the cells of one drawn row, so a click is answered
-// from the zone map instead of a frame the prompt measured itself. A row the body
-// had no room for is not drawn, so it is not registered and cannot be clicked.
-func recordPickerRow(zones *zone.Map, row pickerRow, surface frame.Surface, line int) {
-	if row.index < 0 {
-		return
-	}
-	zones.Add(session.RowZone(row.index), 0, surface.BodyY(line), surface.Frame.ContentWidth(), 1)
 }
 
 // handleMouse is the mouse half of the picker while it is choosing a layout: a
@@ -990,7 +989,7 @@ func placeholderPickerRows(surface frame.Frame, message, hint string) []pickerRo
 	lines := placeholderRows(surface, message, hint)
 	rows := make([]pickerRow, 0, len(lines))
 	for _, line := range lines {
-		rows = append(rows, pickerRow{index: -1, paint: func(list.Roles) string { return line }})
+		rows = append(rows, pickerRow{index: -1, line: line})
 	}
 	return rows
 }
