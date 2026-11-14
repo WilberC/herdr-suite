@@ -95,6 +95,18 @@ func TestCaptureSpacePicker(t *testing.T) {
 	resizeLayoutPicker(empty, 140, 40)
 	frames[prefix+"-space-empty"] = captureCanvas(empty.View(), 140, 40)
 
+	// The pointer over the row beside the selection, so both tints can be judged
+	// side by side. hover is counted from one, so 2 is row 1.
+	hovered := newLayoutPicker(captureEntries(), nil)
+	resizeLayoutPicker(hovered, 140, 40)
+	hovered.hover = 2
+	frames[prefix+"-space-hover"] = captureCanvas(hovered.View(), 140, 40)
+
+	hoveredPrompt := &workspacePicker{workspaces: captureWorkspaceList()}
+	resizeWorkspacePicker(hoveredPrompt, 140, 40)
+	hoveredPrompt.hover = 2
+	frames[prefix+"-workspace-hover"] = captureCanvas(hoveredPrompt.View(), 140, 40)
+
 	restoring := newLayoutPicker(captureEntries(), func(layout.Entry, func(layout.Step)) (string, error) {
 		return "", nil
 	})

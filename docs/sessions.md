@@ -78,6 +78,32 @@ prompts fill them instead of sitting in a band of unused pane.
 
 The herdr binary is found through `HERDR_BIN_PATH`, then `PATH`.
 
+## Mouse
+
+The switcher listens to the mouse because a list is what a pointer is good at, and
+it asks the terminal for all-motion reporting so the row under the pointer can be
+previewed. Every mouse action is a key in disguise:
+
+| Pointer | Same as | Does |
+| --- | --- | --- |
+| click a session | `↑` / `↓` until it is highlighted | selects it; a click on a row nested under a session selects its session |
+| double click a session | `enter` | attaches it (creates the typed name when nothing matches) |
+| click the paging chip | `tab` | next page of the binding bar, wrapping at the end |
+| wheel | `↑` / `↓` | moves the highlight; it stops at both ends of the list |
+| pointer over a row | — | that row wears the fainter hover tint, a preview of the selection |
+
+A double click is two presses on the same row within 400 ms. A single click
+never runs anything, so nothing happens by accident, and **no destructive action
+has a click path**: `ctrl-r`, `ctrl-s` and `ctrl-x` stay on their keys and keep
+their `[y/N]` confirmation. While a confirmation is open the mouse does not
+answer it and does not move the selection; `y` or `n` does. Only a row and a chip
+are clickable, never the header, the filter or the footer text.
+
+A program that captures the mouse owns the drag, so the switcher implements no
+text selection: use your terminal's own selection instead. Most terminal
+emulators keep Shift+drag for themselves, and inside a herdr popup that is your
+emulator's rule — herdr adds no modifier bypass of its own.
+
 ## Forking a session
 
 `hs session fork [session] [layout-name]` snapshots every workspace of a session

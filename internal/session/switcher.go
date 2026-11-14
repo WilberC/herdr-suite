@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
 	"github.com/WilberC/tui-kit/chip"
@@ -16,6 +17,7 @@ import (
 	"github.com/WilberC/tui-kit/spinner"
 	"github.com/WilberC/tui-kit/text"
 	"github.com/WilberC/tui-kit/theme"
+	"github.com/WilberC/tui-kit/zone"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -96,14 +98,24 @@ func (s *Switcher) Prepare(ctx context.Context) error {
 	return nil
 }
 
-// Run shows the switcher until the user leaves it.
+// Run shows the switcher until the user leaves it. The program reports every
+// motion, not only the motion between two presses, because hover needs it: herdr
+// forwards a moved event to a popup pane whose program enabled mouse reporting
+// (src/client/shell/mouse.rs "MouseEventKind::Moved if hit.mouse_reporting"), and
+// its host terminal is in any-event tracking.
 func (s *Switcher) Run(in io.Reader, out io.Writer) error {
-	options := []tea.ProgramOption{tea.WithOutput(out)}
+	_, err := tea.NewProgram(s.model, programOptions(in, out)...).Run()
+	return err
+}
+
+// programOptions is what the switcher asks the terminal for: the streams the
+// caller handed in, and all-motion mouse reporting for the hover.
+func programOptions(in io.Reader, out io.Writer) []tea.ProgramOption {
+	options := []tea.ProgramOption{tea.WithOutput(out), tea.WithMouseAllMotion()}
 	if in != nil {
 		options = append(options, tea.WithInput(in))
 	}
-	_, err := tea.NewProgram(s.model, options...).Run()
-	return err
+	return options
 }
 
 // Target is the session to attach once the switcher exits: the restarted
@@ -151,15 +163,30 @@ type switcher struct {
 	previewErr        error
 	previewDone       bool
 
-	bar    chip.HintBar
-	barKey string
+	bar chip.HintBar
+
+	// hover is the match the pointer is over, counted from one so the zero value
+	// means the pointer is over no match at all. zones holds where this render
+	// drew each clickable element; the kit rewrites it into pane cells.
+	hover int
+	zones *zone.Map
+	// clicks recognises a double click, and now is the clock it reads: a test
+	// drives the clock instead of waiting.
+	clicks Clicks
+	now    func() time.Time
 
 	width  int
 	height int
 }
 
 func newSwitcher(config SwitcherConfig) *switcher {
-	return &switcher{manager: config.Manager, flagPath: config.RestartFlag, preview: config.Preview}
+	return &switcher{
+		manager:  config.Manager,
+		flagPath: config.RestartFlag,
+		preview:  config.Preview,
+		zones:    zone.New(),
+		now:      time.Now,
+	}
 }
 
 // previewMsg carries one session's preview back to the model.
@@ -177,6 +204,8 @@ func (s *switcher) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return s, s.handleKey(msg)
+	case tea.MouseMsg:
+		return s, s.handleMouse(msg)
 	case tea.WindowSizeMsg:
 		s.width, s.height = msg.Width, msg.Height
 		return s, nil
@@ -224,14 +253,13 @@ func (s *switcher) handleKey(key tea.KeyMsg) tea.Cmd {
 	// and the filter only takes runes, so the key reaches neither and pages the
 	// hints instead.
 	if key.String() == chip.PageKey {
-		s.bar.Next(s.surface().Frame.ContentWidth(), s.syncBar()...)
+		s.bar.Next(s.surface().Frame.ContentWidth(), s.hints()...)
 		return nil
 	}
 
 	if s.pending != nil {
 		action := *s.pending
 		s.pending = nil
-		s.syncBar()
 		switch strings.ToLower(key.String()) {
 		case "y", "yes":
 			s.apply(action)
@@ -314,7 +342,6 @@ func (s *switcher) ask(kind promptKind) {
 		return
 	}
 	s.pending = &pendingAction{kind: kind, name: session.Name}
-	s.syncBar()
 }
 
 func (s *switcher) apply(action pendingAction) {
@@ -370,6 +397,9 @@ func (s *switcher) refilter() {
 	if s.cursor < 0 {
 		s.cursor = 0
 	}
+	// The rows moved under the pointer, so no row is hovered until the pointer
+	// moves again: a stale index would tint a row the pointer never reached.
+	s.hover = 0
 }
 
 func (s *switcher) dropLastRune() {
@@ -391,6 +421,11 @@ func (s *switcher) highlighted() (herdrmock.Session, bool) {
 // View renders the switcher: the shared surface, a header naming what the list
 // is sorted by, the live filter, the grouped list, and a footer pinned to the
 // bottom that details the highlighted session and lists the bindings.
+//
+// The render also records where it drew every clickable element: one zone per
+// session row and, under it, the rows of its preview, which act on the session
+// they hang under. The zones are rewritten into pane cells by the surface, so a
+// click is answered from the cell alone.
 func (s *switcher) View() string {
 	surface := s.surface()
 	panel := surface.Frame
@@ -398,28 +433,150 @@ func (s *switcher) View() string {
 	inner := panel.ContentWidth()
 
 	surface.Top = []string{
-		panel.Row(s.headerContent(inner)),
+		surface.Row(width, s.headerContent(inner)),
 		panel.Rule(),
-		panel.Row(s.filterContent(inner)),
+		surface.Row(width, s.filterContent(inner)),
 	}
 
-	bottom := make([]string, 0, 6)
+	bottom := make([]string, 0, 7)
 	if status := s.statusContent(inner); status != "" {
-		bottom = append(bottom, panel.Row(""), panel.Row(status))
+		bottom = append(bottom, surface.Row(width, ""), surface.Row(width, status))
 	}
-	bottom = append(bottom, panel.Rule(), panel.Row(s.detailContent(inner)))
+	bottom = append(bottom, panel.Rule(), surface.Row(width, s.detailContent(inner)))
 	if s.pending != nil {
-		bottom = append(bottom, panel.Row(s.pendingContent()))
+		bottom = append(bottom, surface.Row(width, s.pendingContent()))
 	}
-	bottom = append(bottom, panel.Row(s.bar.Render(inner, s.syncBar()...)))
+	// The hint bar is the last inner row, whatever the state added above it, so
+	// its placeholder is what tells BottomY where its chips land.
+	bottom = append(bottom, surface.Row(width, ""))
 	surface.Bottom = bottom
 
-	body := window(s.bodyLines(inner), surface.BodyRows(height))
-	lines := make([]string, len(body))
-	for i, line := range body {
-		lines[i] = panel.Row(line.styled)
+	zones := s.frameZones()
+	hintLine := len(bottom) - 1
+	bottom[hintLine] = surface.Row(width, s.bar.RenderZones(zones, 0, surface.BottomY(height, hintLine), inner, s.hints()...))
+
+	rows := windowRows(s.bodyRows(inner), surface.BodyRows(height))
+	nameWidth := max(8, inner-24)
+	lines := make([]string, len(rows))
+	for i, row := range rows {
+		lines[i] = surface.Row(width, s.paintRow(row, inner, nameWidth))
+		s.recordRow(zones, row, surface, i)
 	}
-	return surface.Popup(width, height, lines)
+	return surface.PopupZones(width, height, lines, zones)
+}
+
+// frameZones is the map this render records into, emptied so a click is never
+// answered from a frame that is no longer on screen.
+func (s *switcher) frameZones() *zone.Map {
+	if s.zones == nil {
+		s.zones = zone.New()
+	}
+	s.zones.Reset()
+	return s.zones
+}
+
+// recordRow registers the cells of one drawn body row: a session row under its
+// own id, and a row nested under a session as that session's child, so a click on
+// a workspace selects the session it belongs to. A row the body had no room for
+// is not drawn, so it is not registered and cannot be clicked.
+func (s *switcher) recordRow(zones *zone.Map, row bodyRow, surface frame.Surface, line int) {
+	if row.match < 0 {
+		return
+	}
+	id := RowZone(row.match)
+	if row.session == nil {
+		id = ChildZone(row.match)
+	}
+	zones.Add(id, 0, surface.BodyY(line), surface.Frame.ContentWidth(), 1)
+}
+
+// handleMouse is the mouse half of S8: a press selects the row it landed on, a
+// second press on the same row inside DoubleClickWindow runs that row's default
+// action, the wheel moves the selection, motion hovers, and a click on the paging
+// chip is chip.PageKey. No destructive action has a click path: stop, restart and
+// delete stay on their keys and keep their confirmation.
+func (s *switcher) handleMouse(mouse tea.MouseMsg) tea.Cmd {
+	switch mouse.Action {
+	case tea.MouseActionMotion:
+		s.hover = s.matchAt(mouse.X, mouse.Y) + 1
+		return nil
+	case tea.MouseActionPress:
+	default:
+		return nil
+	}
+
+	switch mouse.Button {
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		if s.pending != nil {
+			return nil
+		}
+		delta := 1
+		if mouse.Button == tea.MouseButtonWheelUp {
+			delta = -1
+		}
+		return s.moveSelection(delta)
+	case tea.MouseButtonLeft:
+	default:
+		return nil
+	}
+
+	id, ok := s.zones.Hit(mouse.X, mouse.Y)
+	if !ok {
+		return nil
+	}
+	if id == chip.PageZone {
+		s.bar.Next(s.surface().Frame.ContentWidth(), s.hints()...)
+		return nil
+	}
+	// A pending confirmation belongs to the keyboard: y or n answers it, and a
+	// click neither answers it nor moves what it is about.
+	if s.pending != nil {
+		return nil
+	}
+	index, ok := RowZoneIndex(id)
+	if !ok {
+		return nil
+	}
+
+	s.hover = index + 1
+	s.cursor = index
+	if s.clicks.Double(id, s.clock()) {
+		return s.pick(false)
+	}
+	return s.previewCmd()
+}
+
+// matchAt is the match a click at (x, y) landed on, or -1 for a cell that is not
+// a row.
+func (s *switcher) matchAt(x, y int) int {
+	id, ok := s.zones.Hit(x, y)
+	if !ok {
+		return -1
+	}
+	index, ok := RowZoneIndex(id)
+	if !ok {
+		return -1
+	}
+	return index
+}
+
+// moveSelection moves the highlight by delta rows and stops at both ends, which is
+// what the wheel and the cursor keys share.
+func (s *switcher) moveSelection(delta int) tea.Cmd {
+	next := s.cursor + delta
+	if next < 0 || next >= len(s.matches) || next == s.cursor {
+		return nil
+	}
+	s.cursor = next
+	return s.previewCmd()
+}
+
+// clock is the time a press happened, from the clock the caller installed.
+func (s *switcher) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 const (
@@ -451,31 +608,6 @@ func (s *switcher) surface() frame.Surface {
 	surface := frame.Surface{Frame: frame.Frame{Title: title}, Size: frame.Recommended}
 	surface.Frame.Width = surface.Width(width)
 	return surface
-}
-
-// syncBar returns the hints this state shows and starts the bar at its first
-// page whenever the set changed. Every transition that swaps the set calls it,
-// and so does every render, so a confirmation opening or closing never leaves
-// the bar on a page the new set does not have.
-func (s *switcher) syncBar() []chip.Hint {
-	hints := s.hints()
-	if key := hintKey(hints); key != s.barKey {
-		s.barKey = key
-		s.bar.Page = 0
-	}
-	return hints
-}
-
-// hintKey names a set of hints, so the bar compares the set and not the window.
-func hintKey(hints []chip.Hint) string {
-	var key strings.Builder
-	for _, hint := range hints {
-		key.WriteString(hint.Key)
-		key.WriteByte(0)
-		key.WriteString(hint.Label)
-		key.WriteByte(0)
-	}
-	return key.String()
 }
 
 // headerContent names what the list is sorted by on the left and counts the
@@ -516,18 +648,23 @@ func (s *switcher) filterContent(width int) string {
 	return text.Join(left, right, width)
 }
 
-// bodyLine is one list row: the match it belongs to, and whether it is the
-// highlighted one. A header, a workspace and a placeholder row belong to no
-// match.
-type bodyLine struct {
+// bodyRow is one row of the list before it is painted: the match a click on it
+// selects (-1 for a row that selects nothing), the session whose name it draws
+// (nil for a row that is already styled), the guide its place in the group asks
+// for, and the content of a row that is not a session.
+type bodyRow struct {
 	match    int
-	styled   string
 	selected bool
+	session  *herdrmock.Session
+	last     bool
+	content  string
 }
 
-// bodyLines renders the grouped list: a header per state, one row per session,
-// and the highlighted session's workspaces nested under it.
-func (s *switcher) bodyLines(width int) []bodyLine {
+// bodyRows renders the grouped list: a header per state, one row per session,
+// and the highlighted session's workspaces nested under it. A row records what it
+// selects instead of its final colours, because those depend on whether the
+// pointer is over it this frame.
+func (s *switcher) bodyRows(width int) []bodyRow {
 	if len(s.matches) == 0 {
 		if s.query == "" {
 			return s.placeholder("no sessions yet", "type a name, then press enter to create it")
@@ -539,9 +676,7 @@ func (s *switcher) bodyLines(width int) []bodyLine {
 		return s.placeholder("nothing matches \""+s.query+"\"", hint)
 	}
 
-	nameWidth := max(8, width-24)
-
-	lines := make([]bodyLine, 0, len(s.matches)+6)
+	rows := make([]bodyRow, 0, len(s.matches)+6)
 	state := -1
 	for i, session := range s.matches {
 		running := 0
@@ -552,20 +687,15 @@ func (s *switcher) bodyLines(width int) []bodyLine {
 			state = running
 			// The body opens with its own blank row, so only the groups after the
 			// first one get a separator row.
-			if len(lines) > 0 {
-				lines = append(lines, bodyLine{match: -1})
+			if len(rows) > 0 {
+				rows = append(rows, bodyRow{match: -1})
 			}
-			lines = append(lines, bodyLine{match: -1, styled: groupHeader(session.Running, countState(s.matches, running))})
+			rows = append(rows, bodyRow{match: -1, content: groupHeader(session.Running, countState(s.matches, running))})
 		}
 
 		last := i == len(s.matches)-1 || s.matches[i+1].Running != session.Running
-		roles := list.RowRoles(i == s.cursor)
-		body := roles.Name.Render(text.Clip(session.Name, nameWidth)) + defaultMark(roles, session)
-		row := list.Row(roles, last, body)
-		if i == s.cursor {
-			row = list.SelectedRow(row, width)
-		}
-		lines = append(lines, bodyLine{match: i, selected: i == s.cursor, styled: row})
+		session := session
+		rows = append(rows, bodyRow{match: i, selected: i == s.cursor, session: &session, last: last})
 
 		if i != s.cursor {
 			continue
@@ -577,9 +707,44 @@ func (s *switcher) bodyLines(width int) []bodyLine {
 		if !last {
 			continuation = "  " + theme.Quiet.Render("│") + "  "
 		}
-		lines = append(lines, s.workspaceLines(continuation, width)...)
+		// A nested row is the session's detail, so a click on it acts on the
+		// session it belongs to.
+		for _, child := range s.workspaceLines(continuation, width) {
+			child.match = i
+			rows = append(rows, child)
+		}
 	}
-	return lines
+	return rows
+}
+
+// paintRow draws one body row with the roles its state asks for: the selected row
+// keeps the selection's tint, the row under the pointer wears the fainter one, and
+// the selection wins where both apply. Only a session row can wear either, because
+// the rows nested under it are facts about it, not targets of their own.
+func (s *switcher) paintRow(row bodyRow, width, nameWidth int) string {
+	roles := list.RowRolesFor(list.State{
+		Selected: row.selected,
+		Hovered:  row.session != nil && !row.selected && row.match+1 == s.hover,
+	})
+	if row.session == nil {
+		if roles.Selected {
+			return list.SelectedRow(row.content, width)
+		}
+		if roles.Hovered {
+			return roles.Pad(row.content, width)
+		}
+		return row.content
+	}
+
+	body := roles.Name.Render(text.Clip(row.session.Name, nameWidth)) + defaultMark(roles, *row.session)
+	line := list.Row(roles, row.last, body)
+	switch {
+	case roles.Selected:
+		return list.SelectedRow(line, width)
+	case roles.Hovered:
+		return roles.Pad(line, width)
+	}
+	return line
 }
 
 // countState counts the matches in one state group.
@@ -606,23 +771,23 @@ func groupHeader(running bool, count int) string {
 }
 
 // defaultMark is the gold marker of the default session: it outlives the
-// selection, so it keeps its own colour on a tinted row too.
+// selection, so it keeps its own colour on a tinted or hovered row too.
 func defaultMark(roles list.Roles, session herdrmock.Session) string {
 	if !session.Default {
 		return ""
 	}
-	return roles.Gap(2) + roles.Gold.Render(text.Mark)
+	return list.Mark(roles)
 }
 
 // workspaceLines renders the highlighted session's workspaces as the rows
 // nested under it, with the counts and the agent state in fixed columns.
-func (s *switcher) workspaceLines(continuation string, width int) []bodyLine {
-	rows := make([]bodyLine, 0, len(s.previewWorkspaces)+1)
+func (s *switcher) workspaceLines(continuation string, width int) []bodyRow {
+	rows := make([]bodyRow, 0, len(s.previewWorkspaces)+1)
 	guide := func(last bool) string {
 		return continuation + list.Guide(theme.Quiet, last) + " "
 	}
-	line := func(last bool, content string) bodyLine {
-		return bodyLine{match: -1, styled: guide(last) + content}
+	line := func(last bool, content string) bodyRow {
+		return bodyRow{match: -1, content: guide(last) + content}
 	}
 
 	session, ok := s.highlighted()
@@ -630,16 +795,16 @@ func (s *switcher) workspaceLines(continuation string, width int) []bodyLine {
 		return nil
 	}
 	if !session.Running {
-		return []bodyLine{line(true, theme.Muted.Render("stopped")+theme.Dot()+theme.Muted.Render("enter starts it again"))}
+		return []bodyRow{line(true, theme.Muted.Render("stopped")+theme.Dot()+theme.Muted.Render("enter starts it again"))}
 	}
 	if !s.previewDone {
-		return []bodyLine{line(true, spinner.Render(0)+" "+theme.Muted.Render("loading workspaces…"))}
+		return []bodyRow{line(true, spinner.Render(0)+" "+theme.Muted.Render("loading workspaces…"))}
 	}
 	if s.previewErr != nil {
-		return []bodyLine{line(true, theme.Red.Render("unavailable"))}
+		return []bodyRow{line(true, theme.Red.Render("unavailable"))}
 	}
 	if len(s.previewWorkspaces) == 0 {
-		return []bodyLine{line(true, theme.Muted.Render("no workspaces yet"))}
+		return []bodyRow{line(true, theme.Muted.Render("no workspaces yet"))}
 	}
 
 	labelWidth, countWidth := 0, 0
@@ -665,32 +830,32 @@ func (s *switcher) workspaceLines(continuation string, width int) []bodyLine {
 // placeholder centers a calm message in the body: the state on the first line,
 // what to do next on the second. The frame pads the body at both ends already,
 // so the placeholder's own blank edges are dropped rather than doubled.
-func (s *switcher) placeholder(message, hint string) []bodyLine {
+func (s *switcher) placeholder(message, hint string) []bodyRow {
 	lines := s.surface().Frame.Placeholder(message, hint)
 	lines = lines[1 : len(lines)-1]
-	rows := make([]bodyLine, 0, len(lines))
+	rows := make([]bodyRow, 0, len(lines))
 	for _, line := range lines {
-		rows = append(rows, bodyLine{match: -1, styled: line})
+		rows = append(rows, bodyRow{match: -1, content: line})
 	}
 	return rows
 }
 
-// window keeps the highlighted row in view when the list is longer than the
-// body, centering the visible slice on it.
-func window(lines []bodyLine, height int) []bodyLine {
-	if len(lines) <= height {
-		return lines
+// windowRows keeps the highlighted row in view when the list is longer than the
+// body, centering the visible slice on it. The slice is the body the surface
+// draws, so the y of a row is its index in this slice.
+func windowRows(rows []bodyRow, height int) []bodyRow {
+	if len(rows) <= height {
+		return rows
 	}
 	cursor := 0
-	for i, line := range lines {
-		if line.selected {
+	for i, row := range rows {
+		if row.selected {
 			cursor = i
 			break
 		}
 	}
-	start := cursor - height/2
-	start = max(0, min(start, len(lines)-height))
-	return lines[start : start+height]
+	start := max(0, min(cursor-height/2, len(rows)-height))
+	return rows[start : start+height]
 }
 
 // statusContent is the one-line result of the last action.
@@ -750,10 +915,12 @@ func (s *switcher) pendingContent() string {
 // hints is the binding bar of the current state: the two answers a pending
 // confirmation takes, or the keys that act on the list in the order a user
 // reaches for them. A narrow window pages the bar instead of dropping a hint.
+// The confirmation's yes keeps its gold slab, so the destructive answer reads as
+// the one that acts while its neighbour stays the default surface.
 func (s *switcher) hints() []chip.Hint {
 	if s.pending != nil {
 		return []chip.Hint{
-			{Key: "y", Label: "yes"},
+			{Key: "y", Label: "yes", Slab: &theme.ChipGold},
 			{Key: "n", Label: "no, keep it"},
 		}
 	}

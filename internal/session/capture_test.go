@@ -128,6 +128,21 @@ func TestCaptureSwitcher(t *testing.T) {
 	resizeSwitcher(pending, 140, 40)
 	frames[prefix+"-switcher-pending"] = captureCanvas(pending.View(), 140, 40)
 
+	// The pointer over the row beside the selection, so both tints can be judged
+	// side by side. hover is counted from one, so cursor+2 is the next match.
+	hovered := captureModel(captureSessions(), captureWorkspaces())
+	resizeSwitcher(hovered, 140, 40)
+	hovered.hover = hovered.cursor + 2
+	frames[prefix+"-switcher-hover"] = captureCanvas(hovered.View(), 140, 40)
+
+	// The confirmation a destructive binding opens: its yes keeps the gold slab
+	// while its neighbour keeps the default one.
+	confirm := captureModel(captureSessions(), captureWorkspaces())
+	resizeSwitcher(confirm, 140, 40)
+	dangerous := pendingAction{kind: promptStop, name: "work"}
+	confirm.pending = &dangerous
+	frames[prefix+"-switcher-confirm"] = captureCanvas(confirm.View(), 140, 40)
+
 	writeCaptureFrames(t, dir, frames)
 }
 

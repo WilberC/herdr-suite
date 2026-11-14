@@ -1,5 +1,5 @@
-github.com/WilberC/tui-kit v0.2.0 h1:1GTXjWzZm70wHOzjzdLtfwEdrsYauazpYRekqiy4dhU=
-github.com/WilberC/tui-kit v0.2.0/go.mod h1:c6rCt1HFSav40430m+JYg+P8c9q4mvJ6ZKrh3vNO+wQ=
+github.com/WilberC/tui-kit v0.3.0 h1:1hVe/eYhNgr8YZ6A/2tiSCBXMOM4w0io2RrgPGX9A5g=
+github.com/WilberC/tui-kit v0.3.0/go.mod h1:c6rCt1HFSav40430m+JYg+P8c9q4mvJ6ZKrh3vNO+wQ=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/charmbracelet/bubbletea v1.3.10 h1:otUDHWMMzQSB0Pkc87rm691KZ3SWa4KUlvF9nRvCICw=

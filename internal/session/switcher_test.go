@@ -717,7 +717,9 @@ func TestSwitcherTabKeepsAPendingConfirmation(t *testing.T) {
 }
 
 // TestSwitcherHintPageResetsWhenTheConfirmationCloses pins the reset: the page
-// belongs to a set of hints, so a new set starts from its first page.
+// belongs to a set of hints, so a new set starts from its first page. The bar owns
+// that reset now, and it notices the set when it draws it, so the confirmation is
+// rendered before it is answered — which is what a running program does.
 func TestSwitcherHintPageResetsWhenTheConfirmationCloses(t *testing.T) {
 	switcher := newSizedSwitcher(t, 80, 24)
 
@@ -729,6 +731,9 @@ func TestSwitcherHintPageResetsWhenTheConfirmationCloses(t *testing.T) {
 	pressKey(switcher, tea.KeyMsg{Type: tea.KeyCtrlS})
 	if switcher.model.pending == nil {
 		t.Fatalf("ctrl+s opened no confirmation")
+	}
+	if view := switcher.model.View(); !strings.Contains(view, "[y/N]") {
+		t.Fatalf("the confirmation is not on screen:\n%s", view)
 	}
 	pressKey(switcher, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 

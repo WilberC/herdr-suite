@@ -145,6 +145,16 @@ page. Both prompts keep a compact frame on purpose -- 60 to 120 columns and 16
 to 24 rows -- because a store of layouts is a short fixed list; past 24 rows the
 body windows on the highlight instead of growing into an empty band.
 
+## Mouse
+
+Both prompts take the mouse the same way the [switcher does](sessions.md#mouse):
+a click selects the row it landed on, a double click runs the row's default
+action — load the layout, pick the workspace — and the wheel moves the highlight
+inside the body. A single click only selects: loading a layout stays a deliberate
+act, and the paging chip answers like `tab`. The restoring, done and failed views
+take no mouse action, because their only answer is any key. Neither prompt
+implements text selection, so use the terminal's own.
+
 `--dry-run` prints the replay plan and changes nothing: the ordered list of
 closes, creations, splits, renames, agent starts and focus steps, with the stored
 pane ids, the directions and the ratios the replay would use.
