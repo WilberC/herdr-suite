@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
-	"github.com/WilberC/herdr-suite/internal/ui"
+	"github.com/WilberC/tui-kit/list"
+	"github.com/WilberC/tui-kit/text"
+	"github.com/WilberC/tui-kit/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -379,7 +381,7 @@ func TestSwitcherViewFitsTheWindow(t *testing.T) {
 			t.Fatalf("%s: view has %d lines, want at most %d", size.name, len(lines), size.h)
 		}
 		for i, line := range lines {
-			if got := ui.Width(line); got > size.w {
+			if got := text.Width(line); got > size.w {
 				t.Fatalf("%s: line %d is %d cells wide, want at most %d: %q", size.name, i, got, size.w, line)
 			}
 		}
@@ -394,7 +396,7 @@ func TestSwitcherViewFitsTheWindow(t *testing.T) {
 		switcher.model.cursor = len(switcher.model.matches) - 1
 		pressKey(switcher, tea.KeyMsg{Type: tea.KeyCtrlX})
 		for i, line := range strings.Split(switcher.model.View(), "\n") {
-			if got := ui.Width(line); got > size.w {
+			if got := text.Width(line); got > size.w {
 				t.Fatalf("%s: line %d is %d cells wide with a status and a confirmation, want at most %d: %q", size.name, i, got, size.w, line)
 			}
 		}
@@ -413,7 +415,7 @@ func TestSwitcherMarksExactlyOneSelectedRow(t *testing.T) {
 		}
 		var marked []string
 		for _, line := range strings.Split(switcher.model.View(), "\n") {
-			if strings.Contains(line, ui.SelectMark) {
+			if strings.Contains(line, text.SelectMark) {
 				marked = append(marked, line)
 			}
 		}
@@ -495,7 +497,7 @@ func TestSwitcherKeepsTheHighlightInView(t *testing.T) {
 		t.Fatalf("view has %d lines, want at most 24", len(lines))
 	}
 	session, _ := switcher.model.highlighted()
-	if !strings.Contains(view, ui.SelectMark+" ") || !strings.Contains(view, session.Name) {
+	if !strings.Contains(view, text.SelectMark+" ") || !strings.Contains(view, session.Name) {
 		t.Fatalf("the highlighted session %q is not on screen:\n%s", session.Name, view)
 	}
 	if !strings.Contains(lines[len(lines)-1], "╯") {
@@ -531,7 +533,7 @@ func TestSwitcherSelectionTintsTheChosenRow(t *testing.T) {
 
 	var tinted []string
 	for _, line := range strings.Split(switcher.model.View(), "\n") {
-		if strings.Contains(line, roleEscape(ui.SelectionBG)) {
+		if strings.Contains(line, roleEscape(theme.SelectionBG)) {
 			tinted = append(tinted, line)
 		}
 	}
@@ -539,13 +541,13 @@ func TestSwitcherSelectionTintsTheChosenRow(t *testing.T) {
 		t.Fatalf("view tinted %d rows, want exactly one:\n%s", len(tinted), strings.Join(tinted, "\n"))
 	}
 	session, _ := switcher.model.highlighted()
-	if !strings.Contains(tinted[0], session.Name) || !strings.Contains(tinted[0], ui.SelectMark) {
+	if !strings.Contains(tinted[0], session.Name) || !strings.Contains(tinted[0], text.SelectMark) {
 		t.Fatalf("the tinted row is not the highlighted session: %q", tinted[0])
 	}
-	if !strings.Contains(tinted[0], roleEscape(ui.RowRoles(true).Gold)) {
+	if !strings.Contains(tinted[0], roleEscape(list.RowRoles(true).Gold)) {
 		t.Fatalf("the default marker lost its gold on the tint: %q", tinted[0])
 	}
-	if !strings.Contains(tinted[0], roleEscape(ui.TextOnSelection)) {
+	if !strings.Contains(tinted[0], roleEscape(theme.TextOnSelection)) {
 		t.Fatalf("the selected name is not painted with the selection text role: %q", tinted[0])
 	}
 	if strings.Contains(tinted[0], "48;2;121;162;247") {

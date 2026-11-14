@@ -11,7 +11,7 @@ import (
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
 	"github.com/WilberC/herdr-suite/internal/layout"
-	"github.com/WilberC/herdr-suite/internal/ui"
+	"github.com/WilberC/tui-kit/text"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 )
@@ -125,7 +125,7 @@ func captureCanvas(view string, w, h int) string {
 		lines = append(lines, "")
 	}
 	for i, line := range lines {
-		if pad := w - ui.Width(line); pad > 0 {
+		if pad := w - text.Width(line); pad > 0 {
 			lines[i] = line + strings.Repeat(" ", pad)
 		}
 	}

@@ -9,7 +9,9 @@ import (
 
 	"github.com/WilberC/herdr-suite/internal/layout"
 	"github.com/WilberC/herdr-suite/internal/session"
-	"github.com/WilberC/herdr-suite/internal/ui"
+	"github.com/WilberC/tui-kit/list"
+	"github.com/WilberC/tui-kit/text"
+	"github.com/WilberC/tui-kit/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -329,7 +331,7 @@ func TestLayoutPickerViewFitsTheWindow(t *testing.T) {
 			t.Fatalf("%s: view has %d lines, want at most %d", size.name, len(lines), size.h)
 		}
 		for i, line := range lines {
-			if got := ui.Width(line); got > size.w {
+			if got := text.Width(line); got > size.w {
 				t.Fatalf("%s: line %d is %d cells wide, want at most %d: %q", size.name, i, got, size.w, line)
 			}
 		}
@@ -350,7 +352,7 @@ func TestLayoutPickerMarksExactlyOneSelectedRow(t *testing.T) {
 		entry := pickerFixture()[model.cursor]
 		var marked []string
 		for _, line := range strings.Split(model.View(), "\n") {
-			if strings.Contains(line, ui.SelectMark) {
+			if strings.Contains(line, text.SelectMark) {
 				marked = append(marked, line)
 			}
 		}
@@ -521,7 +523,7 @@ func tintedRow(t *testing.T, view string) string {
 	t.Helper()
 	var tinted []string
 	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, selectRoleEscape(ui.SelectionBG)) {
+		if strings.Contains(line, selectRoleEscape(theme.SelectionBG)) {
 			tinted = append(tinted, line)
 		}
 	}
@@ -547,16 +549,16 @@ func TestLayoutPickerSelectionKeepsItsFacts(t *testing.T) {
 			t.Fatalf("the selected layout lost %q on the tint: %q", want, row)
 		}
 	}
-	if !strings.Contains(row, selectRoleEscape(ui.MutedOnSelection)) {
+	if !strings.Contains(row, selectRoleEscape(theme.MutedOnSelection)) {
 		t.Fatalf("the selected row's facts are not lifted onto the tint: %q", row)
 	}
-	if !strings.Contains(row, selectRoleEscape(ui.TextOnSelection)) {
+	if !strings.Contains(row, selectRoleEscape(theme.TextOnSelection)) {
 		t.Fatalf("the selected layout's name is not painted with the selection text role: %q", row)
 	}
-	if !strings.Contains(row, ui.SelectMark) || !strings.ContainsAny(row, "├└") {
+	if !strings.Contains(row, text.SelectMark) || !strings.ContainsAny(row, "├└") {
 		t.Fatalf("the selected row lost its edge or its guide: %q", row)
 	}
-	if strings.Contains(row, selectRoleEscape(ui.Muted)) {
+	if strings.Contains(row, selectRoleEscape(theme.Muted)) {
 		t.Fatalf("the selected row's facts kept the panel muted tone: %q", row)
 	}
 }
@@ -572,7 +574,7 @@ func TestWorkspacePickerSelectionKeepsTheAgentState(t *testing.T) {
 	if !strings.Contains(row, "project") || !strings.Contains(row, "working") {
 		t.Fatalf("the selected workspace lost its facts: %q", row)
 	}
-	if !strings.Contains(row, selectRoleEscape(ui.RowRoles(true).Green)) {
+	if !strings.Contains(row, selectRoleEscape(list.RowRoles(true).Green)) {
 		t.Fatalf("the agent state lost its colour on the tint: %q", row)
 	}
 }

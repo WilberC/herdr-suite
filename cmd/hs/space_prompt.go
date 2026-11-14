@@ -10,7 +10,12 @@ import (
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
 	"github.com/WilberC/herdr-suite/internal/layout"
 	"github.com/WilberC/herdr-suite/internal/session"
-	"github.com/WilberC/herdr-suite/internal/ui"
+	"github.com/WilberC/tui-kit/chip"
+	"github.com/WilberC/tui-kit/frame"
+	"github.com/WilberC/tui-kit/list"
+	"github.com/WilberC/tui-kit/spinner"
+	"github.com/WilberC/tui-kit/text"
+	"github.com/WilberC/tui-kit/theme"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -78,55 +83,55 @@ func (p *workspacePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the workspaces as aligned rows, and the footer the pickers share.
 func (p *workspacePicker) View() string {
 	width, height := pickerWindow(p.width, p.height)
-	frame := spaceFrame(width)
-	inner := frame.ContentWidth()
+	surface := spaceFrame(width)
+	inner := surface.ContentWidth()
 
-	right := ui.Muted.Render("esc to cancel")
+	right := theme.Muted.Render("esc to cancel")
 	if len(p.workspaces) > 0 {
-		right = ui.Muted.Render(countLabel(len(p.workspaces), "workspace") + " · esc to cancel")
+		right = theme.Muted.Render(countLabel(len(p.workspaces), "workspace") + " · esc to cancel")
 	}
-	rows := []string{frame.Row(ui.Join(
-		ui.Label("load", "into which workspace?", ui.AccentBold),
+	rows := []string{surface.Row(text.Join(
+		theme.Label("load", "into which workspace?", theme.AccentBold),
 		right,
 		inner,
-	)), frame.Rule(), frame.Row("")}
-	rows = append(rows, p.bodyRows(frame)...)
-	rows = append(rows, frame.Rule(), frame.Row(p.detailContent(inner)), frame.Row(p.hintsContent(inner)))
-	return ui.Float(ui.Layout(frame, rows...), width, height)
+	)), surface.Rule(), surface.Row("")}
+	rows = append(rows, p.bodyRows(surface)...)
+	rows = append(rows, surface.Rule(), surface.Row(p.detailContent(inner)), surface.Row(p.hintsContent(inner)))
+	return frame.Float(frame.Layout(surface, rows...), width, height)
 }
 
 // bodyRows renders the workspaces with their counts and agent state in fixed
 // columns, the highlighted one as a solid bar.
-func (p *workspacePicker) bodyRows(frame ui.Frame) []string {
+func (p *workspacePicker) bodyRows(surface frame.Frame) []string {
 	if len(p.workspaces) == 0 {
-		return placeholderRows(frame, "no workspaces to load into", "open one in herdr, then run this again")
+		return placeholderRows(surface, "no workspaces to load into", "open one in herdr, then run this again")
 	}
 
 	labelWidth, countWidth := 0, 0
 	counts := make([]string, len(p.workspaces))
 	for i, workspace := range p.workspaces {
-		labelWidth = max(labelWidth, ui.Width(workspace.Label))
+		labelWidth = max(labelWidth, text.Width(workspace.Label))
 		counts[i] = countLabel(workspace.TabCount, "tab") + " · " + countLabel(workspace.PaneCount, "pane")
-		countWidth = max(countWidth, ui.Width(counts[i]))
+		countWidth = max(countWidth, text.Width(counts[i]))
 	}
-	labelWidth = min(labelWidth, max(8, frame.ContentWidth()/3))
+	labelWidth = min(labelWidth, max(8, surface.ContentWidth()/3))
 
 	rows := make([]string, 0, len(p.workspaces))
 	for i, workspace := range p.workspaces {
-		roles := ui.RowRoles(i == p.cursor)
+		roles := list.RowRoles(i == p.cursor)
 		content := roles.Pad(roles.Name.Render(workspace.Label), labelWidth)
 		content += roles.Gap(2) + roles.Pad(roles.Muted.Render(counts[i]), countWidth)
 		if agent := roles.AgentState(workspace.AgentState); agent != "" {
 			content += roles.Gap(2) + roles.Pad(agent, 9)
 		}
 		if workspace.Focused {
-			content += roles.Gap(2) + roles.Gold.Render(ui.Mark)
+			content += roles.Gap(2) + roles.Gold.Render(text.Mark)
 		}
-		row := ui.Row(roles, i == len(p.workspaces)-1, content)
+		row := list.Row(roles, i == len(p.workspaces)-1, content)
 		if i == p.cursor {
-			row = ui.SelectedRow(row, frame.ContentWidth())
+			row = list.SelectedRow(row, surface.ContentWidth())
 		}
-		rows = append(rows, frame.Row(row))
+		rows = append(rows, surface.Row(row))
 	}
 	return rows
 }
@@ -134,27 +139,27 @@ func (p *workspacePicker) bodyRows(frame ui.Frame) []string {
 // detailContent names the highlighted workspace and its facts.
 func (p *workspacePicker) detailContent(width int) string {
 	if len(p.workspaces) == 0 || p.cursor < 0 || p.cursor >= len(p.workspaces) {
-		return ui.Muted.Render("no workspace to load into")
+		return theme.Muted.Render("no workspace to load into")
 	}
 	workspace := p.workspaces[p.cursor]
-	left := ui.AccentBold.Render(workspace.Label) +
-		ui.Dot() + ui.Text.Render(countLabel(workspace.TabCount, "tab")) +
-		ui.Dot() + ui.Text.Render(countLabel(workspace.PaneCount, "pane"))
-	if agent := ui.RowRoles(false).AgentState(workspace.AgentState); agent != "" {
-		left += ui.Dot() + agent
+	left := theme.AccentBold.Render(workspace.Label) +
+		theme.Dot() + theme.Text.Render(countLabel(workspace.TabCount, "tab")) +
+		theme.Dot() + theme.Text.Render(countLabel(workspace.PaneCount, "pane"))
+	if agent := list.RowRoles(false).AgentState(workspace.AgentState); agent != "" {
+		left += theme.Dot() + agent
 	}
 	if workspace.Focused {
-		left += ui.Dot() + ui.Gold.Render(ui.Mark+" focused")
+		left += theme.Dot() + theme.Gold.Render(text.Mark+" focused")
 	}
-	return ui.Footer(left, "", width)
+	return frame.Footer(left, "", width)
 }
 
 // hintsContent is the binding bar of the prompt.
 func (p *workspacePicker) hintsContent(width int) string {
-	return ui.Hints(width,
-		ui.Hint{Key: "↑↓", Label: "move"},
-		ui.Hint{Key: "enter", Label: "load"},
-		ui.Hint{Key: "esc", Label: "cancel"},
+	return chip.Hints(width,
+		chip.Hint{Key: "↑↓", Label: "move"},
+		chip.Hint{Key: "enter", Label: "load"},
+		chip.Hint{Key: "esc", Label: "cancel"},
 	)
 }
 
@@ -200,7 +205,7 @@ type (
 
 // pickerFrames is the spinner a restoring picker shows: the frame advances on
 // its own tick, so a slow step reads as work in progress rather than a hang.
-var pickerFrames = ui.SpinnerFrames
+var pickerFrames = spinner.Frames
 
 const (
 	// pickerSpinnerDelay is how often the restoring spinner advances.
@@ -405,51 +410,51 @@ func pickResult(model *layoutPicker) (layoutPick, error) {
 // surface: choosing a layout, restoring one, done, or failed.
 func (p *layoutPicker) View() string {
 	width, height := pickerWindow(p.width, p.height)
-	frame := spaceFrame(width)
+	surface := spaceFrame(width)
 	switch p.phase {
 	case pickerRestoring:
-		return p.restoringView(frame, width, height)
+		return p.restoringView(surface, width, height)
 	case pickerDone:
-		return p.doneView(frame, width, height)
+		return p.doneView(surface, width, height)
 	case pickerFailed:
-		return p.failedView(frame, width, height)
+		return p.failedView(surface, width, height)
 	}
-	return p.choosingView(frame, width, height)
+	return p.choosingView(surface, width, height)
 }
 
-func (p *layoutPicker) choosingView(frame ui.Frame, width, height int) string {
-	inner := frame.ContentWidth()
-	right := ui.Muted.Render("esc to cancel")
+func (p *layoutPicker) choosingView(surface frame.Frame, width, height int) string {
+	inner := surface.ContentWidth()
+	right := theme.Muted.Render("esc to cancel")
 	if len(p.entries) > 0 {
-		right = ui.Muted.Render(fmt.Sprintf("%d %s · esc to cancel", len(p.entries), plural(len(p.entries), "layout")))
+		right = theme.Muted.Render(fmt.Sprintf("%d %s · esc to cancel", len(p.entries), plural(len(p.entries), "layout")))
 	}
-	rows := []string{frame.Row(ui.Join(
-		ui.Label("load", "which layout?", ui.AccentBold),
+	rows := []string{surface.Row(text.Join(
+		theme.Label("load", "which layout?", theme.AccentBold),
 		right,
 		inner,
-	)), frame.Rule()}
-	rows = append(rows, p.choosingRows(frame)...)
-	rows = append(rows, frame.Rule(), frame.Row(p.detailContent(inner)), frame.Row(p.hintsContent(inner)))
-	return ui.Float(ui.Layout(frame, rows...), width, height)
+	)), surface.Rule()}
+	rows = append(rows, p.choosingRows(surface)...)
+	rows = append(rows, surface.Rule(), surface.Row(p.detailContent(inner)), surface.Row(p.hintsContent(inner)))
+	return frame.Float(frame.Layout(surface, rows...), width, height)
 }
 
 // choosingRows renders the layouts grouped by the scope they were found in:
 // the project's first, then the global store, then explicit paths. The rows keep
 // the order the store lists, so the cursor and the action it confirms cannot
 // drift from what the CLI would pick.
-func (p *layoutPicker) choosingRows(frame ui.Frame) []string {
-	inner := frame.ContentWidth()
+func (p *layoutPicker) choosingRows(surface frame.Frame) []string {
+	inner := surface.ContentWidth()
 	if len(p.entries) == 0 {
-		return placeholderRows(frame, "no layouts found", "save one with hs space save <name>")
+		return placeholderRows(surface, "no layouts found", "save one with hs space save <name>")
 	}
 
 	nameWidth, workspaceWidth, countWidth := 0, 0, 0
 	counts := make([]string, len(p.entries))
 	for i, entry := range p.entries {
-		nameWidth = max(nameWidth, ui.Width(entry.Name))
-		workspaceWidth = max(workspaceWidth, ui.Width(entry.Workspace))
+		nameWidth = max(nameWidth, text.Width(entry.Name))
+		workspaceWidth = max(workspaceWidth, text.Width(entry.Workspace))
 		counts[i] = countLabel(entry.Tabs, "tab") + " · " + countLabel(entry.Panes, "pane")
-		countWidth = max(countWidth, ui.Width(counts[i]))
+		countWidth = max(countWidth, text.Width(counts[i]))
 	}
 	nameWidth = min(nameWidth, max(8, inner/4))
 	workspaceWidth = min(workspaceWidth, max(6, inner/5))
@@ -461,25 +466,25 @@ func (p *layoutPicker) choosingRows(frame ui.Frame) []string {
 			// The rule above already separates the first group; the groups after
 			// it get one blank row, the same rhythm the switcher uses.
 			if scope != "" {
-				rows = append(rows, frame.Row(""))
+				rows = append(rows, surface.Row(""))
 			}
 			scope = entry.Scope
-			rows = append(rows, frame.Row(ui.Section(scope, countScope(p.entries, scope))))
+			rows = append(rows, surface.Row(list.Section(scope, countScope(p.entries, scope))))
 		}
-		roles := ui.RowRoles(i == p.cursor)
+		roles := list.RowRoles(i == p.cursor)
 		content := roles.Pad(roles.Name.Render(entry.Name), nameWidth)
 		content += roles.Gap(2) + roles.Pad(roles.Muted.Render(entry.Workspace), workspaceWidth)
 		content += roles.Gap(2) + roles.Pad(roles.Muted.Render(counts[i]), countWidth)
 
 		last := i == len(p.entries)-1 || p.entries[i+1].Scope != entry.Scope
-		row := ui.Row(roles, last, content)
-		if when := ui.RelativeTime(time.Now(), entry.Modified); when != "" {
+		row := list.Row(roles, last, content)
+		if when := text.RelativeTime(time.Now(), entry.Modified); when != "" {
 			row = roles.AlignRight(row, roles.Muted.Render(when)+roles.Gap(1), inner)
 		}
 		if i == p.cursor {
-			row = ui.SelectedRow(row, inner)
+			row = list.SelectedRow(row, inner)
 		}
-		rows = append(rows, frame.Row(row))
+		rows = append(rows, surface.Row(row))
 	}
 	return rows
 }
@@ -489,28 +494,28 @@ func (p *layoutPicker) choosingRows(frame ui.Frame) []string {
 // already implied.
 func (p *layoutPicker) detailContent(width int) string {
 	if len(p.entries) == 0 || p.cursor < 0 || p.cursor >= len(p.entries) {
-		return ui.Muted.Render("no layout to load")
+		return theme.Muted.Render("no layout to load")
 	}
 	entry := p.entries[p.cursor]
-	left := ui.AccentBold.Render(entry.Name) + " " + ui.Chip(ui.ChipGold, entry.Scope)
+	left := theme.AccentBold.Render(entry.Name) + " " + chip.Chip(theme.ChipGold, entry.Scope)
 	if entry.Workspace != "" {
-		left += ui.Dot() + ui.Label("workspace", entry.Workspace, ui.TealBold)
+		left += theme.Dot() + theme.Label("workspace", entry.Workspace, theme.TealBold)
 	}
-	left += ui.Dot() + ui.Text.Render(countLabel(entry.Tabs, "tab")) +
-		ui.Dot() + ui.Text.Render(countLabel(entry.Panes, "pane"))
-	if when := ui.RelativeTime(time.Now(), entry.Modified); when != "" {
-		left += ui.Dot() + ui.Muted.Render(when)
+	left += theme.Dot() + theme.Text.Render(countLabel(entry.Tabs, "tab")) +
+		theme.Dot() + theme.Text.Render(countLabel(entry.Panes, "pane"))
+	if when := text.RelativeTime(time.Now(), entry.Modified); when != "" {
+		left += theme.Dot() + theme.Muted.Render(when)
 	}
 
-	path := ui.ShortPath(entry.Path)
-	room := width - ui.Width(left) - 2
+	path := text.ShortPath(entry.Path)
+	room := width - text.Width(left) - 2
 	switch {
 	case path == "":
 		return left
-	case ui.Width(path) <= room:
-		return ui.Footer(left, ui.Muted.Render(path), width)
+	case text.Width(path) <= room:
+		return frame.Footer(left, theme.Muted.Render(path), width)
 	case room >= 18:
-		return ui.Footer(left, ui.Muted.Render(ui.EllipsisPath(path, room)), width)
+		return frame.Footer(left, theme.Muted.Render(text.EllipsisPath(path, room)), width)
 	default:
 		return left
 	}
@@ -518,30 +523,30 @@ func (p *layoutPicker) detailContent(width int) string {
 
 // hintsContent is the binding bar of the picker.
 func (p *layoutPicker) hintsContent(width int) string {
-	return ui.Hints(width,
-		ui.Hint{Key: "↑↓", Label: "move"},
-		ui.Hint{Key: "enter", Label: "load"},
-		ui.Hint{Key: "esc", Label: "cancel"},
+	return chip.Hints(width,
+		chip.Hint{Key: "↑↓", Label: "move"},
+		chip.Hint{Key: "enter", Label: "load"},
+		chip.Hint{Key: "esc", Label: "cancel"},
 	)
 }
 
 // restoringView shows the replay as it runs: the spinner and the step on the
 // row they replace, the steps already done under them, and the one binding that
 // still works while a restore is in flight.
-func (p *layoutPicker) restoringView(frame ui.Frame, width, height int) string {
-	inner := frame.ContentWidth()
-	rows := []string{frame.Row(ui.Join(
-		ui.Label("restore", "in progress", ui.TealBold),
-		ui.Muted.Render(countLabel(len(p.steps), "step")+" done"),
+func (p *layoutPicker) restoringView(surface frame.Frame, width, height int) string {
+	inner := surface.ContentWidth()
+	rows := []string{surface.Row(text.Join(
+		theme.Label("restore", "in progress", theme.TealBold),
+		theme.Muted.Render(countLabel(len(p.steps), "step")+" done"),
 		inner,
-	)), frame.Rule()}
+	)), surface.Rule()}
 
 	describe := "starting"
 	if p.step != nil {
 		describe = fmt.Sprintf("step %d/%d %s", p.step.Index, p.step.Total, p.step.Describe())
 	}
-	rows = append(rows, frame.Row(
-		ui.Spinner(p.frame)+" "+ui.AccentBold.Render(fmt.Sprintf("restoring '%s'", p.entry.Name))+ui.Dot()+ui.Text.Render(describe),
+	rows = append(rows, surface.Row(
+		spinner.Render(p.frame)+" "+theme.AccentBold.Render(fmt.Sprintf("restoring '%s'", p.entry.Name))+theme.Dot()+theme.Text.Render(describe),
 	))
 
 	budget := max(1, height-pickerChrome-2)
@@ -550,47 +555,47 @@ func (p *layoutPicker) restoringView(frame ui.Frame, width, height int) string {
 		done = done[len(done)-budget:]
 	}
 	for i, step := range done {
-		rows = append(rows, frame.Row(ui.Guide(ui.Quiet, i == len(done)-1)+" "+ui.Green.Render("✓")+" "+ui.Muted.Render(step.Describe())))
+		rows = append(rows, surface.Row(list.Guide(theme.Quiet, i == len(done)-1)+" "+theme.Green.Render("✓")+" "+theme.Muted.Render(step.Describe())))
 	}
 
-	rows = append(rows, frame.Rule(),
-		frame.Row(p.detailContent(inner)),
-		frame.Row(ui.Hints(inner, ui.Hint{Key: "ctrl+c", Label: "stop watching"})))
-	return ui.Float(ui.Layout(frame, rows...), width, height)
+	rows = append(rows, surface.Rule(),
+		surface.Row(p.detailContent(inner)),
+		surface.Row(chip.Hints(inner, chip.Hint{Key: "ctrl+c", Label: "stop watching"})))
+	return frame.Float(frame.Layout(surface, rows...), width, height)
 }
 
 // doneView reports the replay that just finished.
-func (p *layoutPicker) doneView(frame ui.Frame, width, height int) string {
-	inner := frame.ContentWidth()
+func (p *layoutPicker) doneView(surface frame.Frame, width, height int) string {
+	inner := surface.ContentWidth()
 	rows := []string{
-		frame.Row(ui.Label("restore", "done", ui.GreenBold)),
-		frame.Rule(),
-		frame.Row(ui.Center(ui.GreenBold.Render(fmt.Sprintf("✓ restored '%s'", p.entry.Name))+ui.Dot()+ui.Muted.Render(countLabel(len(p.steps), "step")), inner)),
-		frame.Rule(),
-		frame.Row(ui.Hints(inner, ui.Hint{Key: "any key", Label: "close"})),
+		surface.Row(theme.Label("restore", "done", theme.GreenBold)),
+		surface.Rule(),
+		surface.Row(text.Center(theme.GreenBold.Render(fmt.Sprintf("✓ restored '%s'", p.entry.Name))+theme.Dot()+theme.Muted.Render(countLabel(len(p.steps), "step")), inner)),
+		surface.Rule(),
+		surface.Row(chip.Hints(inner, chip.Hint{Key: "any key", Label: "close"})),
 	}
-	return ui.Float(ui.Layout(frame, rows...), width, height)
+	return frame.Float(frame.Layout(surface, rows...), width, height)
 }
 
 // failedView names the step that stopped the replay and keeps the picker up
 // until a key, so the failure can be read.
-func (p *layoutPicker) failedView(frame ui.Frame, width, height int) string {
+func (p *layoutPicker) failedView(surface frame.Frame, width, height int) string {
 	rows := []string{
-		frame.Row(ui.Label("restore", "failed", ui.RedBold)),
-		frame.Rule(),
-		frame.Row(ui.RedBold.Render(fmt.Sprintf("✗ restoring '%s' failed", p.entry.Name))),
+		surface.Row(theme.Label("restore", "failed", theme.RedBold)),
+		surface.Rule(),
+		surface.Row(theme.RedBold.Render(fmt.Sprintf("✗ restoring '%s' failed", p.entry.Name))),
 	}
 
 	var step layout.StepError
 	if errors.As(p.restoreErr, &step) {
 		label := layout.Step{Index: step.Index, Total: step.Total, Action: step.Action, Workspace: step.Workspace}
-		rows = append(rows, frame.Row(ui.Muted.Render(fmt.Sprintf("step %d/%d", step.Index, step.Total))+" "+ui.Text.Render(label.Describe())))
-		rows = append(rows, frame.Row(ui.Red.Render(step.Err.Error())))
+		rows = append(rows, surface.Row(theme.Muted.Render(fmt.Sprintf("step %d/%d", step.Index, step.Total))+" "+theme.Text.Render(label.Describe())))
+		rows = append(rows, surface.Row(theme.Red.Render(step.Err.Error())))
 	} else {
-		rows = append(rows, frame.Row(ui.Red.Render(p.restoreErr.Error())))
+		rows = append(rows, surface.Row(theme.Red.Render(p.restoreErr.Error())))
 	}
-	rows = append(rows, frame.Rule(), frame.Row(ui.Muted.Render("press any key to exit")))
-	return ui.Float(ui.Layout(frame, rows...), width, height)
+	rows = append(rows, surface.Rule(), surface.Row(theme.Muted.Render("press any key to exit")))
+	return frame.Float(frame.Layout(surface, rows...), width, height)
 }
 
 const (
@@ -617,17 +622,17 @@ func pickerWindow(width, height int) (int, int) {
 
 // spaceFrame is the surface both space prompts render inside: the same frame,
 // title and rules the switcher uses, so the two read as one product.
-func spaceFrame(width int) ui.Frame {
-	title := ui.GoldBold.Render("hs") + ui.Quiet.Render(" ❯ ") + ui.AccentBold.Render("space load")
-	return ui.Frame{Title: title, Width: min(max(width, 32), pickerMaxWidth)}
+func spaceFrame(width int) frame.Frame {
+	title := theme.GoldBold.Render("hs") + theme.Quiet.Render(" ❯ ") + theme.AccentBold.Render("space load")
+	return frame.Frame{Title: title, Width: min(max(width, 32), pickerMaxWidth)}
 }
 
 // placeholderRows centers a calm message in a prompt's body.
-func placeholderRows(frame ui.Frame, message, hint string) []string {
-	lines := frame.Placeholder(message, hint)
+func placeholderRows(surface frame.Frame, message, hint string) []string {
+	lines := surface.Placeholder(message, hint)
 	rows := make([]string, 0, len(lines))
 	for _, line := range lines {
-		rows = append(rows, frame.Row(line))
+		rows = append(rows, surface.Row(line))
 	}
 	return rows
 }

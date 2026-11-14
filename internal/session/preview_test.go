@@ -8,14 +8,14 @@ import (
 	"testing"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
-	"github.com/WilberC/herdr-suite/internal/ui"
+	"github.com/WilberC/tui-kit/text"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // markedRow is the one line the selection bar painted.
 func markedRow(view string) string {
 	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, ui.SelectMark) {
+		if strings.Contains(line, text.SelectMark) {
 			return line
 		}
 	}

@@ -10,7 +10,12 @@ import (
 	"strings"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
-	"github.com/WilberC/herdr-suite/internal/ui"
+	"github.com/WilberC/tui-kit/chip"
+	"github.com/WilberC/tui-kit/frame"
+	"github.com/WilberC/tui-kit/list"
+	"github.com/WilberC/tui-kit/spinner"
+	"github.com/WilberC/tui-kit/text"
+	"github.com/WilberC/tui-kit/theme"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -374,33 +379,33 @@ func (s *switcher) highlighted() (herdrmock.Session, bool) {
 // is sorted by, the live filter, the grouped list, and a footer that details
 // the highlighted session and lists the bindings.
 func (s *switcher) View() string {
-	frame := s.frame()
-	width := frame.ContentWidth()
+	surface := s.frame()
+	width := surface.ContentWidth()
 
 	rows := []string{
-		frame.Row(s.headerContent(width)),
-		frame.Rule(),
-		frame.Row(s.filterContent(width)),
+		surface.Row(s.headerContent(width)),
+		surface.Rule(),
+		surface.Row(s.filterContent(width)),
 	}
 
 	body := s.bodyLines(width)
 	body = window(body, s.bodyHeight())
 	for _, line := range body {
-		rows = append(rows, frame.Row(line.styled))
+		rows = append(rows, surface.Row(line.styled))
 	}
 
 	if body := s.statusContent(width); body != "" {
-		rows = append(rows, frame.Row(""), frame.Row(body))
+		rows = append(rows, surface.Row(""), surface.Row(body))
 	}
-	rows = append(rows, frame.Rule(), frame.Row(s.detailContent(width)))
+	rows = append(rows, surface.Rule(), surface.Row(s.detailContent(width)))
 	if s.pending != nil {
-		rows = append(rows, frame.Row(s.pendingContent()), frame.Row(s.pendingHints()))
+		rows = append(rows, surface.Row(s.pendingContent()), surface.Row(s.pendingHints()))
 	} else {
-		rows = append(rows, frame.Row(s.hintsContent(width)))
+		rows = append(rows, surface.Row(s.hintsContent(width)))
 	}
 
 	windowWidth, windowHeight := s.window()
-	return ui.Float(ui.Layout(frame, rows...), windowWidth, windowHeight)
+	return frame.Float(frame.Layout(surface, rows...), windowWidth, windowHeight)
 }
 
 const (
@@ -430,10 +435,10 @@ func (s *switcher) window() (int, int) {
 }
 
 // frame is the surface every state of the switcher renders inside.
-func (s *switcher) frame() ui.Frame {
+func (s *switcher) frame() frame.Frame {
 	width, _ := s.window()
-	title := ui.GoldBold.Render("hs") + ui.Quiet.Render(" ❯ ") + ui.AccentBold.Render("sessions")
-	return ui.Frame{Title: title, Width: min(width, switcherMaxWidth)}
+	title := theme.GoldBold.Render("hs") + theme.Quiet.Render(" ❯ ") + theme.AccentBold.Render("sessions")
+	return frame.Frame{Title: title, Width: min(width, switcherMaxWidth)}
 }
 
 // bodyHeight is how many list rows fit under the chrome, leaving room for the
@@ -462,30 +467,30 @@ func (s *switcher) headerContent(width int) string {
 		}
 	}
 
-	left := ui.Label("sort", "running first", ui.AccentBold)
-	right := ui.Muted.Render("esc to close")
+	left := theme.Label("sort", "running first", theme.AccentBold)
+	right := theme.Muted.Render("esc to close")
 	if len(s.sessions) > 0 {
-		right = ui.Green.Render(ui.Live) + " " + ui.GreenBold.Render(itoa(running)) + " " + ui.Muted.Render("running") +
-			ui.Dot() + ui.Muted.Render(ui.Idle) + " " + ui.Muted.Render(itoa(stopped)) + " " + ui.Muted.Render("stopped") +
-			ui.Dot() + right
+		right = theme.Green.Render(text.Live) + " " + theme.GreenBold.Render(itoa(running)) + " " + theme.Muted.Render("running") +
+			theme.Dot() + theme.Muted.Render(text.Idle) + " " + theme.Muted.Render(itoa(stopped)) + " " + theme.Muted.Render("stopped") +
+			theme.Dot() + right
 	}
-	return ui.Join(left, right, width)
+	return text.Join(left, right, width)
 }
 
 // filterContent is the live filter field: the query on the left with the block
 // cursor, how much of the list it leaves on the right.
 func (s *switcher) filterContent(width int) string {
-	left := ui.Accent.Render(FilterCue) + " "
+	left := theme.Accent.Render(FilterCue) + " "
 	if s.query == "" {
-		left += ui.Muted.Render("type a session name to filter…")
+		left += theme.Muted.Render("type a session name to filter…")
 	} else {
-		left += ui.Text.Render(s.query) + ui.Accent.Render(ui.Cursor)
+		left += theme.Text.Render(s.query) + theme.Accent.Render(text.Cursor)
 	}
 	if len(s.sessions) == 0 {
-		return ui.Join(left, "", width)
+		return text.Join(left, "", width)
 	}
-	right := ui.Muted.Render(itoa(len(s.matches)) + " / " + itoa(len(s.sessions)) + " shown")
-	return ui.Join(left, right, width)
+	right := theme.Muted.Render(itoa(len(s.matches)) + " / " + itoa(len(s.sessions)) + " shown")
+	return text.Join(left, right, width)
 }
 
 // bodyLine is one list row: the match it belongs to, and whether it is the
@@ -526,11 +531,11 @@ func (s *switcher) bodyLines(width int) []bodyLine {
 		}
 
 		last := i == len(s.matches)-1 || s.matches[i+1].Running != session.Running
-		roles := ui.RowRoles(i == s.cursor)
-		body := roles.Name.Render(ui.Clip(session.Name, nameWidth)) + defaultMark(roles, session)
-		row := ui.Row(roles, last, body)
+		roles := list.RowRoles(i == s.cursor)
+		body := roles.Name.Render(text.Clip(session.Name, nameWidth)) + defaultMark(roles, session)
+		row := list.Row(roles, last, body)
 		if i == s.cursor {
-			row = ui.SelectedRow(row, width)
+			row = list.SelectedRow(row, width)
 		}
 		lines = append(lines, bodyLine{match: i, selected: i == s.cursor, styled: row})
 
@@ -542,7 +547,7 @@ func (s *switcher) bodyLines(width int) []bodyLine {
 		// its group, so a child always starts three cells past its parent.
 		continuation := "  " + " " + "  "
 		if !last {
-			continuation = "  " + ui.Quiet.Render("│") + "  "
+			continuation = "  " + theme.Quiet.Render("│") + "  "
 		}
 		lines = append(lines, s.workspaceLines(continuation, width)...)
 	}
@@ -563,22 +568,22 @@ func countState(matches []herdrmock.Session, running int) int {
 // groupHeader is a section row: the state glyph, the state in small caps and
 // how many sessions it holds.
 func groupHeader(running bool, count int) string {
-	label, glyph := "STOPPED", ui.Idle
-	style, glyphStyle := ui.Muted, ui.Muted
+	label, glyph := "STOPPED", text.Idle
+	style, glyphStyle := theme.Muted, theme.Muted
 	if running {
-		label, glyph = "RUNNING", ui.Live
-		style, glyphStyle = ui.GreenBold, ui.Green
+		label, glyph = "RUNNING", text.Live
+		style, glyphStyle = theme.GreenBold, theme.Green
 	}
-	return glyphStyle.Render(glyph) + " " + style.Render(label) + "  " + ui.Muted.Render(itoa(count))
+	return glyphStyle.Render(glyph) + " " + style.Render(label) + "  " + theme.Muted.Render(itoa(count))
 }
 
 // defaultMark is the gold marker of the default session: it outlives the
 // selection, so it keeps its own colour on a tinted row too.
-func defaultMark(roles ui.Roles, session herdrmock.Session) string {
+func defaultMark(roles list.Roles, session herdrmock.Session) string {
 	if !session.Default {
 		return ""
 	}
-	return roles.Gap(2) + roles.Gold.Render(ui.Mark)
+	return roles.Gap(2) + roles.Gold.Render(text.Mark)
 }
 
 // workspaceLines renders the highlighted session's workspaces as the rows
@@ -586,7 +591,7 @@ func defaultMark(roles ui.Roles, session herdrmock.Session) string {
 func (s *switcher) workspaceLines(continuation string, width int) []bodyLine {
 	rows := make([]bodyLine, 0, len(s.previewWorkspaces)+1)
 	guide := func(last bool) string {
-		return continuation + ui.Guide(ui.Quiet, last) + " "
+		return continuation + list.Guide(theme.Quiet, last) + " "
 	}
 	line := func(last bool, content string) bodyLine {
 		return bodyLine{match: -1, styled: guide(last) + content}
@@ -597,31 +602,31 @@ func (s *switcher) workspaceLines(continuation string, width int) []bodyLine {
 		return nil
 	}
 	if !session.Running {
-		return []bodyLine{line(true, ui.Muted.Render("stopped")+ui.Dot()+ui.Muted.Render("enter starts it again"))}
+		return []bodyLine{line(true, theme.Muted.Render("stopped")+theme.Dot()+theme.Muted.Render("enter starts it again"))}
 	}
 	if !s.previewDone {
-		return []bodyLine{line(true, ui.Spinner(0)+" "+ui.Muted.Render("loading workspaces…"))}
+		return []bodyLine{line(true, spinner.Render(0)+" "+theme.Muted.Render("loading workspaces…"))}
 	}
 	if s.previewErr != nil {
-		return []bodyLine{line(true, ui.Red.Render("unavailable"))}
+		return []bodyLine{line(true, theme.Red.Render("unavailable"))}
 	}
 	if len(s.previewWorkspaces) == 0 {
-		return []bodyLine{line(true, ui.Muted.Render("no workspaces yet"))}
+		return []bodyLine{line(true, theme.Muted.Render("no workspaces yet"))}
 	}
 
 	labelWidth, countWidth := 0, 0
 	counts := make([]string, len(s.previewWorkspaces))
 	for i, workspace := range s.previewWorkspaces {
-		labelWidth = max(labelWidth, ui.Width(workspace.Label))
+		labelWidth = max(labelWidth, text.Width(workspace.Label))
 		counts[i] = countLabel(workspace.Tabs, "tab") + " · " + countLabel(workspace.Panes, "pane")
-		countWidth = max(countWidth, ui.Width(counts[i]))
+		countWidth = max(countWidth, text.Width(counts[i]))
 	}
 	labelWidth = min(labelWidth, max(8, width/3))
 
 	for i, workspace := range s.previewWorkspaces {
-		content := ui.Fit(ui.Text.Render(workspace.Label), labelWidth)
-		content += "  " + ui.Muted.Render(ui.Fit(counts[i], countWidth))
-		if agent := ui.RowRoles(false).AgentState(workspace.Agent); agent != "" {
+		content := text.Fit(theme.Text.Render(workspace.Label), labelWidth)
+		content += "  " + theme.Muted.Render(text.Fit(counts[i], countWidth))
+		if agent := list.RowRoles(false).AgentState(workspace.Agent); agent != "" {
 			content += "  " + agent
 		}
 		rows = append(rows, line(i == len(s.previewWorkspaces)-1, content))
@@ -663,7 +668,7 @@ func (s *switcher) statusContent(width int) string {
 	if s.status == "" {
 		return ""
 	}
-	return ui.Teal.Render("›") + " " + ui.Text.Render(s.status)
+	return theme.Teal.Render("›") + " " + theme.Text.Render(s.status)
 }
 
 // detailContent names the highlighted session and its facts: state, the default
@@ -673,14 +678,14 @@ func (s *switcher) detailContent(width int) string {
 	session, ok := s.highlighted()
 	if !ok {
 		if len(s.sessions) == 0 {
-			return ui.Muted.Render("no session to attach")
+			return theme.Muted.Render("no session to attach")
 		}
-		return ui.Muted.Render("no match to attach")
+		return theme.Muted.Render("no match to attach")
 	}
 
-	left := ui.AccentBold.Render(session.Name) + " " + ui.StateGlyph(session.Running) + " " + ui.StateWord(session.Running)
+	left := theme.AccentBold.Render(session.Name) + " " + list.StateGlyph(session.Running) + " " + list.StateWord(session.Running)
 	if session.Default {
-		left += ui.Dot() + ui.Gold.Render(ui.Mark+" default")
+		left += theme.Dot() + theme.Gold.Render(text.Mark+" default")
 	}
 
 	right := ""
@@ -689,46 +694,46 @@ func (s *switcher) detailContent(width int) string {
 		if len(s.previewWorkspaces) == 1 {
 			noun = "workspace"
 		}
-		right = ui.TealBold.Render(itoa(len(s.previewWorkspaces))) + " " + ui.Muted.Render(noun)
+		right = theme.TealBold.Render(itoa(len(s.previewWorkspaces))) + " " + theme.Muted.Render(noun)
 	}
 
-	path := ui.ShortPath(session.Socket)
-	room := width - ui.Width(left) - ui.Width(right) - ui.Width(ui.Dot()) - 2
+	path := text.ShortPath(session.Socket)
+	room := width - text.Width(left) - text.Width(right) - text.Width(theme.Dot()) - 2
 	switch {
 	case path == "":
-		return ui.Footer(left, right, width)
-	case ui.Width(path) <= room:
-		return ui.Footer(left+ui.Dot()+ui.Muted.Render(path), right, width)
+		return frame.Footer(left, right, width)
+	case text.Width(path) <= room:
+		return frame.Footer(left+theme.Dot()+theme.Muted.Render(path), right, width)
 	case room >= 14:
-		return ui.Footer(left+ui.Dot()+ui.Muted.Render(ui.EllipsisPath(path, room)), right, width)
+		return frame.Footer(left+theme.Dot()+theme.Muted.Render(text.EllipsisPath(path, room)), right, width)
 	default:
-		return ui.Footer(left, right, width)
+		return frame.Footer(left, right, width)
 	}
 }
 
 // pendingContent is the confirmation a destructive binding opened, worded by the
 // manager so the model and the CLI cannot drift.
 func (s *switcher) pendingContent() string {
-	return ui.RedBold.Render(promptText(*s.pending) + " [y/N]")
+	return theme.RedBold.Render(promptText(*s.pending) + " [y/N]")
 }
 
 // pendingHints answers the confirmation.
 func (s *switcher) pendingHints() string {
-	return ui.Chip(ui.ChipGold, "y") + " " + ui.Muted.Render("yes") + "  " +
-		ui.Chip(ui.ChipText, "n") + " " + ui.Muted.Render("no, keep it")
+	return chip.Chip(theme.ChipGold, "y") + " " + theme.Muted.Render("yes") + "  " +
+		chip.Chip(theme.ChipText, "n") + " " + theme.Muted.Render("no, keep it")
 }
 
 // hintsContent is the binding bar: the keys that act on the list, in the order
 // a user reaches for them. A narrow window drops the last ones instead of
 // wrapping.
 func (s *switcher) hintsContent(width int) string {
-	return ui.Hints(width,
-		ui.Hint{Key: "↑↓", Label: "move"},
-		ui.Hint{Key: "enter", Label: "attach"},
-		ui.Hint{Key: "alt+enter", Label: "create"},
-		ui.Hint{Key: "ctrl+r", Label: "restart"},
-		ui.Hint{Key: "ctrl+s", Label: "stop"},
-		ui.Hint{Key: "ctrl+x", Label: "delete"},
+	return chip.Hints(width,
+		chip.Hint{Key: "↑↓", Label: "move"},
+		chip.Hint{Key: "enter", Label: "attach"},
+		chip.Hint{Key: "alt+enter", Label: "create"},
+		chip.Hint{Key: "ctrl+r", Label: "restart"},
+		chip.Hint{Key: "ctrl+s", Label: "stop"},
+		chip.Hint{Key: "ctrl+x", Label: "delete"},
 	)
 }
 
