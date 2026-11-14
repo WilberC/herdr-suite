@@ -79,6 +79,18 @@ func TestCaptureSpacePicker(t *testing.T) {
 		frames[prefix+"-workspace-"+size.name] = captureCanvas(prompt.View(), size.w, size.h)
 	}
 
+	// The pane a herdr popup actually hands these prompts: the manifest declares
+	// 120x24 cells, and herdr spawns the command in the popup's inner area (one
+	// border cell a side, plus one reserved column), which is where the compact
+	// frame has to fill the pane with no band around it.
+	picker := newLayoutPicker(captureEntries(), nil)
+	resizeLayoutPicker(picker, 117, 22)
+	frames[prefix+"-space-popup"] = captureCanvas(picker.View(), 117, 22)
+
+	prompt := &workspacePicker{workspaces: captureWorkspaceList()}
+	resizeWorkspacePicker(prompt, 117, 22)
+	frames[prefix+"-workspace-popup"] = captureCanvas(prompt.View(), 117, 22)
+
 	empty := newLayoutPicker(nil, nil)
 	resizeLayoutPicker(empty, 140, 40)
 	frames[prefix+"-space-empty"] = captureCanvas(empty.View(), 140, 40)

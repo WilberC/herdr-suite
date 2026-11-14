@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
+	"github.com/WilberC/tui-kit/frame"
 	"github.com/WilberC/tui-kit/list"
 	"github.com/WilberC/tui-kit/text"
 	"github.com/WilberC/tui-kit/theme"
@@ -552,5 +553,186 @@ func TestSwitcherSelectionTintsTheChosenRow(t *testing.T) {
 	}
 	if strings.Contains(tinted[0], "48;2;121;162;247") {
 		t.Fatalf("the row is painted with the accent fill instead of a tint: %q", tinted[0])
+	}
+}
+
+// frameBlock is the frame's own lines: the top border through the bottom border,
+// with the blank rows that centre it in a taller pane dropped.
+func frameBlock(t *testing.T, view string) []string {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	start, end := -1, -1
+	for i, line := range lines {
+		plain := text.Plain(line)
+		if start < 0 && strings.Contains(plain, "╭") {
+			start = i
+		}
+		if strings.Contains(plain, "╰") {
+			end = i
+		}
+	}
+	if start < 0 || end <= start {
+		t.Fatalf("the view holds no closed frame:\n%s", view)
+	}
+	return lines[start : end+1]
+}
+
+// blankBodyRow reports whether a frame line is an interior row with no content:
+// the sides and the rules are there, nothing between them.
+func blankBodyRow(line string) bool {
+	plain := text.Plain(line)
+	if !strings.Contains(plain, "│") {
+		return false
+	}
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '│', '╭', '╮', '╰', '╯', '├', '─', '┤', '┬', '┴':
+			return -1
+		}
+		return r
+	}, plain)) == ""
+}
+
+// TestSwitcherFrameIsTheClampedPaneHeight pins the size rule: in a pane taller
+// than the maximum the frame is exactly the maximum, the body opens and closes
+// with one blank row, and the footer is the last two inner rows, so no empty
+// band is left below it.
+func TestSwitcherFrameIsTheClampedPaneHeight(t *testing.T) {
+	switcher := newSizedSwitcher(t, 180, 50)
+	block := frameBlock(t, switcher.model.View())
+
+	if got, want := len(block), frame.Recommended.MaxHeight; got != want {
+		t.Fatalf("frame height in a 50-row pane = %d, want the clamped %d:\n%s", got, want, strings.Join(block, "\n"))
+	}
+
+	// The top border, the header, its rule and the filter come first; the body
+	// is the content rows plus the two padding rows.
+	bodyFirst := 4
+	// The header, its rule and the filter sit above the body; the closing rule
+	// and the two footer rows below it.
+	pinned := frame.Surface{Size: frame.Recommended, Top: make([]string, 3), Bottom: make([]string, 3)}
+	room := pinned.BodyRows(50) + 2
+	if !blankBodyRow(block[bodyFirst]) {
+		t.Fatalf("the body does not open with a blank row:\n%s", strings.Join(block, "\n"))
+	}
+	if !blankBodyRow(block[bodyFirst+room-1]) {
+		t.Fatalf("the body does not close with a blank row:\n%s", strings.Join(block, "\n"))
+	}
+	if !strings.Contains(text.Plain(block[bodyFirst+room]), "├") {
+		t.Fatalf("the closing rule does not follow the body's padding row:\n%s", strings.Join(block, "\n"))
+	}
+	if hintBar := text.Plain(block[len(block)-2]); !strings.Contains(hintBar, " enter ") || !strings.Contains(hintBar, "attach") {
+		t.Fatalf("the last inner row is not the hint bar: %q", hintBar)
+	}
+	if last := text.Plain(block[len(block)-1]); !strings.Contains(last, "╰") {
+		t.Fatalf("the frame does not close on its bottom border: %q", last)
+	}
+	if line := text.Plain(strings.Split(switcher.model.View(), "\n")[strings.Count(switcher.model.View(), "\n")]); !strings.Contains(line, "╰") {
+		t.Fatalf("the view leaves a band below the frame: %q", line)
+	}
+}
+
+// TestSwitcherFrameFillsAShortPane pins the other end: a pane under the maximum
+// is used whole, so the frame touches both edges instead of hugging its content.
+func TestSwitcherFrameFillsAShortPane(t *testing.T) {
+	switcher := newSizedSwitcher(t, 80, 24)
+	lines := strings.Split(switcher.model.View(), "\n")
+	block := frameBlock(t, switcher.model.View())
+
+	if got, want := len(block), 24; got != want {
+		t.Fatalf("frame height in a 24-row pane = %d, want %d:\n%s", got, want, strings.Join(block, "\n"))
+	}
+	if !strings.Contains(text.Plain(lines[0]), "╭") {
+		t.Fatalf("the frame does not start at the top of the pane: %q", text.Plain(lines[0]))
+	}
+	if !strings.Contains(text.Plain(lines[len(lines)-1]), "╰") {
+		t.Fatalf("the frame does not end at the bottom of the pane: %q", text.Plain(lines[len(lines)-1]))
+	}
+}
+
+// TestSwitcherTabPagesTheBindingBar pins the paging contract: a narrow window
+// says more bindings exist, tab shows them, and tab on the last page wraps.
+func TestSwitcherTabPagesTheBindingBar(t *testing.T) {
+	switcher := newSizedSwitcher(t, 80, 24)
+
+	first := switcher.model.View()
+	if !strings.Contains(first, "more 1/2") {
+		t.Fatalf("the narrow view does not say more bindings exist:\n%s", first)
+	}
+	if strings.Contains(first, " restart") {
+		t.Fatalf("the first page already holds the last bindings:\n%s", first)
+	}
+
+	pressKey(switcher, tea.KeyMsg{Type: tea.KeyTab})
+	second := switcher.model.View()
+	for _, want := range []string{"more 2/2", " restart", " delete"} {
+		if !strings.Contains(second, want) {
+			t.Fatalf("the second page does not contain %q:\n%s", want, second)
+		}
+	}
+	if got := switcher.model.query; got != "" {
+		t.Fatalf("tab reached the filter: query = %q, want empty", got)
+	}
+	for i, line := range strings.Split(second, "\n") {
+		if got := text.Width(line); got > 80 {
+			t.Fatalf("the second page line %d is %d cells wide, want at most 80: %q", i, got, line)
+		}
+	}
+
+	pressKey(switcher, tea.KeyMsg{Type: tea.KeyTab})
+	wrapped := switcher.model.View()
+	if !strings.Contains(wrapped, "more 1/2") || !strings.Contains(wrapped, " enter ") {
+		t.Fatalf("tab did not wrap back to the first page:\n%s", wrapped)
+	}
+}
+
+// TestSwitcherTabKeepsAPendingConfirmation pins that the paging key is handled
+// before the confirmation and the filter: it answers nothing and types nothing.
+func TestSwitcherTabKeepsAPendingConfirmation(t *testing.T) {
+	switcher, client, _, _ := newSwitcherFixture(t, herdrmock.Session{Name: "work", Running: true})
+	switcher.model.width, switcher.model.height = 80, 24
+
+	pressKey(switcher, tea.KeyMsg{Type: tea.KeyCtrlS})
+	pressKey(switcher, tea.KeyMsg{Type: tea.KeyTab})
+
+	if switcher.model.pending == nil {
+		t.Fatalf("tab cancelled the confirmation")
+	}
+	if got := switcher.model.status; got != "" {
+		t.Fatalf("tab answered the confirmation: status = %q, want empty", got)
+	}
+	if got := callTargets(client, "StopSession"); len(got) != 0 {
+		t.Fatalf("tab stopped sessions = %v, want none", got)
+	}
+	if got := switcher.model.query; got != "" {
+		t.Fatalf("tab reached the filter: query = %q, want empty", got)
+	}
+	view := switcher.model.View()
+	if !strings.Contains(view, "[y/N]") {
+		t.Fatalf("the confirmation left the view:\n%s", view)
+	}
+	if strings.Contains(view, "more ") {
+		t.Fatalf("the confirmation's two hints paged instead of fitting:\n%s", view)
+	}
+}
+
+// TestSwitcherHintPageResetsWhenTheConfirmationCloses pins the reset: the page
+// belongs to a set of hints, so a new set starts from its first page.
+func TestSwitcherHintPageResetsWhenTheConfirmationCloses(t *testing.T) {
+	switcher := newSizedSwitcher(t, 80, 24)
+
+	pressKey(switcher, tea.KeyMsg{Type: tea.KeyTab})
+	if view := switcher.model.View(); !strings.Contains(view, "more 2/2") {
+		t.Fatalf("tab did not reach the second page:\n%s", view)
+	}
+
+	pressKey(switcher, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if switcher.model.pending == nil {
+		t.Fatalf("ctrl+s opened no confirmation")
+	}
+	pressKey(switcher, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+
+	if view := switcher.model.View(); !strings.Contains(view, "more 1/2") {
+		t.Fatalf("the bar kept a page from the confirmation's hints:\n%s", view)
 	}
 }

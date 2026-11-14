@@ -151,6 +151,9 @@ type switcher struct {
 	previewErr        error
 	previewDone       bool
 
+	bar    chip.HintBar
+	barKey string
+
 	width  int
 	height int
 }
@@ -217,9 +220,18 @@ func (s *switcher) previewCmd() tea.Cmd {
 }
 
 func (s *switcher) handleKey(key tea.KeyMsg) tea.Cmd {
+	// The paging key comes first: a pending confirmation is answered by y or n
+	// and the filter only takes runes, so the key reaches neither and pages the
+	// hints instead.
+	if key.String() == chip.PageKey {
+		s.bar.Next(s.surface().Frame.ContentWidth(), s.syncBar()...)
+		return nil
+	}
+
 	if s.pending != nil {
 		action := *s.pending
 		s.pending = nil
+		s.syncBar()
 		switch strings.ToLower(key.String()) {
 		case "y", "yes":
 			s.apply(action)
@@ -302,6 +314,7 @@ func (s *switcher) ask(kind promptKind) {
 		return
 	}
 	s.pending = &pendingAction{kind: kind, name: session.Name}
+	s.syncBar()
 }
 
 func (s *switcher) apply(action pendingAction) {
@@ -375,37 +388,38 @@ func (s *switcher) highlighted() (herdrmock.Session, bool) {
 	return s.matches[s.cursor], true
 }
 
-// View renders the switcher: the shared frame, a header naming what the list
-// is sorted by, the live filter, the grouped list, and a footer that details
-// the highlighted session and lists the bindings.
+// View renders the switcher: the shared surface, a header naming what the list
+// is sorted by, the live filter, the grouped list, and a footer pinned to the
+// bottom that details the highlighted session and lists the bindings.
 func (s *switcher) View() string {
-	surface := s.frame()
-	width := surface.ContentWidth()
+	surface := s.surface()
+	panel := surface.Frame
+	width, height := s.window()
+	inner := panel.ContentWidth()
 
-	rows := []string{
-		surface.Row(s.headerContent(width)),
-		surface.Rule(),
-		surface.Row(s.filterContent(width)),
+	surface.Top = []string{
+		panel.Row(s.headerContent(inner)),
+		panel.Rule(),
+		panel.Row(s.filterContent(inner)),
 	}
 
-	body := s.bodyLines(width)
-	body = window(body, s.bodyHeight())
-	for _, line := range body {
-		rows = append(rows, surface.Row(line.styled))
+	bottom := make([]string, 0, 6)
+	if status := s.statusContent(inner); status != "" {
+		bottom = append(bottom, panel.Row(""), panel.Row(status))
 	}
-
-	if body := s.statusContent(width); body != "" {
-		rows = append(rows, surface.Row(""), surface.Row(body))
-	}
-	rows = append(rows, surface.Rule(), surface.Row(s.detailContent(width)))
+	bottom = append(bottom, panel.Rule(), panel.Row(s.detailContent(inner)))
 	if s.pending != nil {
-		rows = append(rows, surface.Row(s.pendingContent()), surface.Row(s.pendingHints()))
-	} else {
-		rows = append(rows, surface.Row(s.hintsContent(width)))
+		bottom = append(bottom, panel.Row(s.pendingContent()))
 	}
+	bottom = append(bottom, panel.Row(s.bar.Render(inner, s.syncBar()...)))
+	surface.Bottom = bottom
 
-	windowWidth, windowHeight := s.window()
-	return frame.Float(frame.Layout(surface, rows...), windowWidth, windowHeight)
+	body := window(s.bodyLines(inner), surface.BodyRows(height))
+	lines := make([]string, len(body))
+	for i, line := range body {
+		lines[i] = panel.Row(line.styled)
+	}
+	return surface.Popup(width, height, lines)
 }
 
 const (
@@ -413,12 +427,6 @@ const (
 	// for before the terminal has reported its size.
 	switcherDefaultWidth  = 100
 	switcherDefaultHeight = 30
-	// switcherMaxWidth keeps the surface a popup on a wide terminal instead of
-	// a row of text lost in the middle of the screen.
-	switcherMaxWidth = 100
-	// switcherChrome is every frame line that is not a list row: the two
-	// borders, header, two rules, filter, detail and hints.
-	switcherChrome = 8
 )
 
 // window is the size the view renders for: the reported size, or the default
@@ -434,25 +442,40 @@ func (s *switcher) window() (int, int) {
 	return width, height
 }
 
-// frame is the surface every state of the switcher renders inside.
-func (s *switcher) frame() frame.Frame {
+// surface is the screen every state of the switcher renders inside: the shared
+// frame within the kit's recommended bounds, its width already clamped so the
+// rows can be composed against it.
+func (s *switcher) surface() frame.Surface {
 	width, _ := s.window()
 	title := theme.GoldBold.Render("hs") + theme.Quiet.Render(" ❯ ") + theme.AccentBold.Render("sessions")
-	return frame.Frame{Title: title, Width: min(width, switcherMaxWidth)}
+	surface := frame.Surface{Frame: frame.Frame{Title: title}, Size: frame.Recommended}
+	surface.Frame.Width = surface.Width(width)
+	return surface
 }
 
-// bodyHeight is how many list rows fit under the chrome, leaving room for the
-// status line and the confirmation when they are up.
-func (s *switcher) bodyHeight() int {
-	_, height := s.window()
-	reserved := switcherChrome
-	if s.status != "" {
-		reserved += 2
+// syncBar returns the hints this state shows and starts the bar at its first
+// page whenever the set changed. Every transition that swaps the set calls it,
+// and so does every render, so a confirmation opening or closing never leaves
+// the bar on a page the new set does not have.
+func (s *switcher) syncBar() []chip.Hint {
+	hints := s.hints()
+	if key := hintKey(hints); key != s.barKey {
+		s.barKey = key
+		s.bar.Page = 0
 	}
-	if s.pending != nil {
-		reserved += 2
+	return hints
+}
+
+// hintKey names a set of hints, so the bar compares the set and not the window.
+func hintKey(hints []chip.Hint) string {
+	var key strings.Builder
+	for _, hint := range hints {
+		key.WriteString(hint.Key)
+		key.WriteByte(0)
+		key.WriteString(hint.Label)
+		key.WriteByte(0)
 	}
-	return max(1, height-reserved)
+	return key.String()
 }
 
 // headerContent names what the list is sorted by on the left and counts the
@@ -527,7 +550,12 @@ func (s *switcher) bodyLines(width int) []bodyLine {
 		}
 		if running != state {
 			state = running
-			lines = append(lines, bodyLine{match: -1}, bodyLine{match: -1, styled: groupHeader(session.Running, countState(s.matches, running))})
+			// The body opens with its own blank row, so only the groups after the
+			// first one get a separator row.
+			if len(lines) > 0 {
+				lines = append(lines, bodyLine{match: -1})
+			}
+			lines = append(lines, bodyLine{match: -1, styled: groupHeader(session.Running, countState(s.matches, running))})
 		}
 
 		last := i == len(s.matches)-1 || s.matches[i+1].Running != session.Running
@@ -635,9 +663,11 @@ func (s *switcher) workspaceLines(continuation string, width int) []bodyLine {
 }
 
 // placeholder centers a calm message in the body: the state on the first line,
-// what to do next on the second.
+// what to do next on the second. The frame pads the body at both ends already,
+// so the placeholder's own blank edges are dropped rather than doubled.
 func (s *switcher) placeholder(message, hint string) []bodyLine {
-	lines := s.frame().Placeholder(message, hint)
+	lines := s.surface().Frame.Placeholder(message, hint)
+	lines = lines[1 : len(lines)-1]
 	rows := make([]bodyLine, 0, len(lines))
 	for _, line := range lines {
 		rows = append(rows, bodyLine{match: -1, styled: line})
@@ -717,24 +747,24 @@ func (s *switcher) pendingContent() string {
 	return theme.RedBold.Render(promptText(*s.pending) + " [y/N]")
 }
 
-// pendingHints answers the confirmation.
-func (s *switcher) pendingHints() string {
-	return chip.Chip(theme.ChipGold, "y") + " " + theme.Muted.Render("yes") + "  " +
-		chip.Chip(theme.ChipText, "n") + " " + theme.Muted.Render("no, keep it")
-}
-
-// hintsContent is the binding bar: the keys that act on the list, in the order
-// a user reaches for them. A narrow window drops the last ones instead of
-// wrapping.
-func (s *switcher) hintsContent(width int) string {
-	return chip.Hints(width,
-		chip.Hint{Key: "↑↓", Label: "move"},
-		chip.Hint{Key: "enter", Label: "attach"},
-		chip.Hint{Key: "alt+enter", Label: "create"},
-		chip.Hint{Key: "ctrl+r", Label: "restart"},
-		chip.Hint{Key: "ctrl+s", Label: "stop"},
-		chip.Hint{Key: "ctrl+x", Label: "delete"},
-	)
+// hints is the binding bar of the current state: the two answers a pending
+// confirmation takes, or the keys that act on the list in the order a user
+// reaches for them. A narrow window pages the bar instead of dropping a hint.
+func (s *switcher) hints() []chip.Hint {
+	if s.pending != nil {
+		return []chip.Hint{
+			{Key: "y", Label: "yes"},
+			{Key: "n", Label: "no, keep it"},
+		}
+	}
+	return []chip.Hint{
+		{Key: "↑↓", Label: "move"},
+		{Key: "enter", Label: "attach"},
+		{Key: "alt+enter", Label: "create"},
+		{Key: "ctrl+r", Label: "restart"},
+		{Key: "ctrl+s", Label: "stop"},
+		{Key: "ctrl+x", Label: "delete"},
+	}
 }
 
 // FilterCue opens the filter field: the glyph the font can always draw, in the

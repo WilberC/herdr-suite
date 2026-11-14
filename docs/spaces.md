@@ -137,6 +137,14 @@ command then prints the failure and exits `1`, exactly as a named load does.
 Ctrl-C while restoring stops watching and leaves the picker. `--select
 --dry-run` only chooses: it prints the plan and changes nothing.
 
+The picker and the workspace prompt below it share the switcher's footer: the
+bindings in one bar under the selected item's facts, and `tab` pages that bar
+when the window is too narrow for every binding. The bar ends with
+`tab more 1/2` while there is more to see, and `tab` wraps back to the first
+page. Both prompts keep a compact frame on purpose -- 60 to 120 columns and 16
+to 24 rows -- because a store of layouts is a short fixed list; past 24 rows the
+body windows on the highlight instead of growing into an empty band.
+
 `--dry-run` prints the replay plan and changes nothing: the ordered list of
 closes, creations, splits, renames, agent starts and focus steps, with the stored
 pane ids, the directions and the ratios the replay would use.

@@ -40,7 +40,14 @@ names only, never the state column:
 | `ctrl-r` | restart the highlighted session after confirmation: stop it, then attach when the switcher closes |
 | `ctrl-s` | stop the highlighted session after confirmation |
 | `ctrl-x` | stop and delete the highlighted session after confirmation |
+| `tab` | page the hint bar when the window is too narrow for every binding |
 | `esc` | quit |
+
+The bindings sit in one bar under the detail line of the footer. When the window
+is too narrow to show them all, the bar shows the first page and ends with
+`tab more 1/2`: `tab` moves to the next page and wraps back to the first.
+Nothing is ever hidden, and `tab` never reaches the filter or answers a
+confirmation.
 
 Herdr forbids nested launches, so `hs` and `hs attach` refuse to run inside a
 herdr pane (`HERDR_ENV`), and attaching replaces the process with
@@ -58,6 +65,16 @@ in progress instead of an empty list. A session that cannot be read shows
 `unavailable`, and a stopped one shows that it is stopped without a read. See
 [Spaces § Long operations](spaces.md#long-operations) for the progress contract
 behind that header.
+
+The switcher and the space prompts draw their frame at the size of the pane with
+the footer pinned to the bottom of the frame. The bounds differ because the
+content does: the switcher clamps to 60..160 columns and 16..40 rows, since it
+nests the highlighted session's workspaces and grows with them, while the space
+prompts clamp to 60..120 columns and 16..24 rows, because a layout store or a
+session's workspaces are a short fixed set and a taller frame would be mostly
+empty under the last row. A pane larger than the bounds shows the frame centred,
+and the two herdr popups in `herdr-plugin.toml` are fixed at 120x24 cells so the
+prompts fill them instead of sitting in a band of unused pane.
 
 The herdr binary is found through `HERDR_BIN_PATH`, then `PATH`.
 

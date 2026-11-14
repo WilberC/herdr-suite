@@ -21,10 +21,14 @@ type manifestAction struct {
 }
 
 type manifestPane struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Placement string   `json:"placement"`
-	Command   []string `json:"command"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Placement string `json:"placement"`
+	// Width and Height are the popup dimensions as tomllib decoded them: a float
+	// for a cell count, a string for a percentage.
+	Width   any      `json:"width"`
+	Height  any      `json:"height"`
+	Command []string `json:"command"`
 }
 
 type manifestEvent struct {
@@ -423,4 +427,61 @@ func keys(values map[string]bool) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// TestPluginPanesSizeTheSpacePromptsForTheirCompactFrame pins the popup geometry
+// of the two panes that draw a frame: `hs space load --select` and `hs space list
+// --pane`. Those screens clamp their own size to compactSize, so a popup larger
+// than that leaves a band around a centred frame and a smaller one starves the
+// body. herdr resolves a cell count against the terminal area and clamps it to
+// it (src/popup_size.rs, resolve_popup_geometry), so a fixed size is safe on a
+// terminal smaller than the popup; and the child TUI is spawned in the popup's
+// inner pane, which the border and one reserved column narrow further.
+func TestPluginPanesSizeTheSpacePromptsForTheirCompactFrame(t *testing.T) {
+	document := parseManifest(t, readManifestBytes(t))
+
+	panes := make(map[string]manifestPane, len(document.Panes))
+	for _, pane := range document.Panes {
+		panes[pane.ID] = pane
+	}
+	for _, id := range []string{"load", "layouts"} {
+		pane, ok := panes[id]
+		if !ok {
+			t.Fatalf("manifest panes = %v, want the %q pane", document.Panes, id)
+		}
+		width, height := paneCells(t, id, pane.Width), paneCells(t, id, pane.Height)
+
+		for _, dimension := range []struct {
+			name     string
+			cells    int
+			min, max int
+		}{
+			{"width", width, compactSize.MinWidth, compactSize.MaxWidth},
+			{"height", height, compactSize.MinHeight, compactSize.MaxHeight},
+			// The size the prompt actually renders in: the popup's border takes
+			// one cell on each side, and herdr reserves one more column.
+			{"inner width", width - 3, compactSize.MinWidth, compactSize.MaxWidth},
+			{"inner height", height - 2, compactSize.MinHeight, compactSize.MaxHeight},
+		} {
+			if dimension.cells < dimension.min || dimension.cells > dimension.max {
+				t.Fatalf("pane %q %s = %d cells, want %d..%d so the compact frame fills the popup",
+					id, dimension.name, dimension.cells, dimension.min, dimension.max)
+			}
+		}
+	}
+}
+
+// paneCells reads one popup dimension as a cell count. The two framed panes use
+// cells on purpose: a percentage lands outside the compact range somewhere
+// between 180x50 and 240x60.
+func paneCells(t *testing.T, pane string, value any) int {
+	t.Helper()
+	cells, ok := value.(float64)
+	if !ok {
+		t.Fatalf("pane %q dimension = %#v, want a cell count", pane, value)
+	}
+	if cells != float64(int(cells)) {
+		t.Fatalf("pane %q dimension = %v, want whole cells", pane, cells)
+	}
+	return int(cells)
 }

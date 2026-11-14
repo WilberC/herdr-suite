@@ -2,13 +2,16 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/WilberC/herdr-suite/internal/herdrmock"
 	"github.com/WilberC/herdr-suite/internal/layout"
 	"github.com/WilberC/herdr-suite/internal/session"
+	"github.com/WilberC/tui-kit/frame"
 	"github.com/WilberC/tui-kit/list"
 	"github.com/WilberC/tui-kit/text"
 	"github.com/WilberC/tui-kit/theme"
@@ -438,8 +441,9 @@ func lastFooterLine(view string) string {
 }
 
 // TestLayoutPickerGroupRhythm pins the vertical rhythm: the rule that closes the
-// header is followed directly by the first group, and every following group gets
-// exactly one blank row -- never two, which is what a stray leading row produced.
+// header is followed by the body's one blank padding row and then the first
+// group, and every following group gets exactly one blank row -- never two,
+// which is what a stray leading row produced.
 func TestLayoutPickerGroupRhythm(t *testing.T) {
 	model := newLayoutPicker([]layout.Entry{
 		{Name: "api", Scope: layout.ScopeProject, Path: "/src/api/.herdr/api.json", Workspace: "api", Tabs: 1, Panes: 2},
@@ -459,8 +463,11 @@ func TestLayoutPickerGroupRhythm(t *testing.T) {
 	if rule < 0 {
 		t.Fatalf("the picker rendered no rule:\n%s", model.View())
 	}
-	if !strings.Contains(lines[rule+1], "● PROJECT") {
-		t.Fatalf("the first group does not follow the rule directly:\n%s", model.View())
+	if !pickerBlankRow(lines[rule+1]) {
+		t.Fatalf("the body does not pad the first group with one blank row:\n%s", model.View())
+	}
+	if !strings.Contains(lines[rule+2], "● PROJECT") {
+		t.Fatalf("the first group does not follow the body's padding row:\n%s", model.View())
 	}
 	for _, want := range []struct {
 		group string
@@ -576,5 +583,214 @@ func TestWorkspacePickerSelectionKeepsTheAgentState(t *testing.T) {
 	}
 	if !strings.Contains(row, selectRoleEscape(list.RowRoles(true).Green)) {
 		t.Fatalf("the agent state lost its colour on the tint: %q", row)
+	}
+}
+
+// pickerFrameBlock is a prompt's own frame lines: the top border through the
+// bottom border, with the blank rows that centre it in a taller pane dropped.
+func pickerFrameBlock(t *testing.T, view string) []string {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	start, end := -1, -1
+	for i, line := range lines {
+		plain := text.Plain(line)
+		if start < 0 && strings.Contains(plain, "╭") {
+			start = i
+		}
+		if strings.Contains(plain, "╰") {
+			end = i
+		}
+	}
+	if start < 0 || end <= start {
+		t.Fatalf("the view holds no closed frame:\n%s", view)
+	}
+	return lines[start : end+1]
+}
+
+// pickerBlankRow reports whether a frame line is an interior row with no content.
+func pickerBlankRow(line string) bool {
+	plain := text.Plain(line)
+	if !strings.Contains(plain, "│") {
+		return false
+	}
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '│', '╭', '╮', '╰', '╯', '├', '─', '┤', '┬', '┴':
+			return -1
+		}
+		return r
+	}, plain)) == ""
+}
+
+// TestLayoutPickerFrameIsTheClampedPaneHeight pins the size rule for the space
+// picker: the frame stops at the compact height in a tall pane, the body is
+// padded at both ends, and the footer sits on the last two inner rows.
+func TestLayoutPickerFrameIsTheClampedPaneHeight(t *testing.T) {
+	model := newLayoutPicker(pickerFixture(), nil)
+	model.width, model.height = 180, 50
+	block := pickerFrameBlock(t, model.View())
+
+	if got, want := len(block), compactSize.MaxHeight; got != want {
+		t.Fatalf("frame height in a 50-row pane = %d, want the compact %d:\n%s", got, want, strings.Join(block, "\n"))
+	}
+
+	bodyFirst := 3 // the top border, the header and its rule
+	// The header and its rule sit above the body; the closing rule and the two
+	// footer rows below it.
+	pinned := frame.Surface{Size: compactSize, Top: make([]string, 2), Bottom: make([]string, 3)}
+	room := pinned.BodyRows(50) + 2
+	if !pickerBlankRow(block[bodyFirst]) {
+		t.Fatalf("the body does not open with a blank row:\n%s", strings.Join(block, "\n"))
+	}
+	if !pickerBlankRow(block[bodyFirst+room-1]) {
+		t.Fatalf("the body does not close with a blank row:\n%s", strings.Join(block, "\n"))
+	}
+	if !strings.Contains(text.Plain(block[bodyFirst+room]), "├") {
+		t.Fatalf("the closing rule does not follow the body's padding row:\n%s", strings.Join(block, "\n"))
+	}
+	if hintBar := text.Plain(block[len(block)-2]); !strings.Contains(hintBar, " enter ") || !strings.Contains(hintBar, " load") {
+		t.Fatalf("the last inner row is not the hint bar: %q", hintBar)
+	}
+	if last := text.Plain(block[len(block)-1]); !strings.Contains(last, "╰") {
+		t.Fatalf("the frame does not close on its bottom border: %q", last)
+	}
+}
+
+// TestWorkspacePickerFrameIsTheClampedPaneHeight pins the same rule for the
+// workspace prompt.
+func TestWorkspacePickerFrameIsTheClampedPaneHeight(t *testing.T) {
+	prompt := &workspacePicker{workspaces: captureWorkspaceList()}
+	prompt.width, prompt.height = 180, 50
+	block := pickerFrameBlock(t, prompt.View())
+
+	if got, want := len(block), compactSize.MaxHeight; got != want {
+		t.Fatalf("frame height in a 50-row pane = %d, want the compact %d:\n%s", got, want, strings.Join(block, "\n"))
+	}
+
+	bodyFirst := 3 // the top border, the header and its rule
+	pinned := frame.Surface{Size: compactSize, Top: make([]string, 2), Bottom: make([]string, 3)}
+	room := pinned.BodyRows(50) + 2
+	if !pickerBlankRow(block[bodyFirst]) || !pickerBlankRow(block[bodyFirst+room-1]) {
+		t.Fatalf("the body is not padded at both ends:\n%s", strings.Join(block, "\n"))
+	}
+	if !strings.Contains(text.Plain(block[bodyFirst+room]), "├") {
+		t.Fatalf("the closing rule does not follow the body's padding row:\n%s", strings.Join(block, "\n"))
+	}
+	if hintBar := text.Plain(block[len(block)-2]); !strings.Contains(hintBar, " enter ") {
+		t.Fatalf("the last inner row is not the hint bar: %q", hintBar)
+	}
+}
+
+// TestLayoutPickerTabPagesTheBindingBar pins the paging contract in the space
+// picker: a narrow window names the position and tab moves through it.
+func TestLayoutPickerTabPagesTheBindingBar(t *testing.T) {
+	model := newLayoutPicker(pickerFixture(), nil)
+	model.width, model.height = 40, 24
+
+	first := model.View()
+	if !strings.Contains(first, "more 1/3") || !strings.Contains(first, " ↑↓  move") {
+		t.Fatalf("the narrow picker does not page its bindings:\n%s", first)
+	}
+	if strings.Contains(first, " enter  load") {
+		t.Fatalf("the first page already holds the second hint:\n%s", first)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	second := model.View()
+	if !strings.Contains(second, "more 2/3") || !strings.Contains(second, " enter  load") {
+		t.Fatalf("tab did not show the second page:\n%s", second)
+	}
+	if model.chosen != "" || model.cancelled {
+		t.Fatalf("tab answered the picker: chosen = %q, cancelled = %v", model.chosen, model.cancelled)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	third := model.View()
+	if !strings.Contains(third, "more 3/3") || !strings.Contains(third, " esc  cancel") {
+		t.Fatalf("tab did not show the third page:\n%s", third)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	wrapped := model.View()
+	if !strings.Contains(wrapped, "more 1/3") || !strings.Contains(wrapped, " ↑↓  move") {
+		t.Fatalf("tab did not wrap back to the first page:\n%s", wrapped)
+	}
+}
+
+// TestWorkspacePickerTabPagesTheBindingBar pins the same contract in the
+// workspace prompt, which has no filter for the key to reach.
+func TestWorkspacePickerTabPagesTheBindingBar(t *testing.T) {
+	prompt := &workspacePicker{workspaces: captureWorkspaceList()}
+	prompt.width, prompt.height = 40, 24
+
+	first := prompt.View()
+	if !strings.Contains(first, "more 1/3") {
+		t.Fatalf("the narrow prompt does not page its bindings:\n%s", first)
+	}
+
+	prompt.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if second := prompt.View(); !strings.Contains(second, "more 2/3") || !strings.Contains(second, " enter  load") {
+		t.Fatalf("tab did not show the second page:\n%s", second)
+	}
+	if prompt.chosen != "" || prompt.cancelled {
+		t.Fatalf("tab answered the prompt: chosen = %q, cancelled = %v", prompt.chosen, prompt.cancelled)
+	}
+
+	prompt.Update(tea.KeyMsg{Type: tea.KeyTab})
+	prompt.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if wrapped := prompt.View(); !strings.Contains(wrapped, "more 1/3") {
+		t.Fatalf("tab did not wrap back to the first page:\n%s", wrapped)
+	}
+}
+
+// TestLayoutPickerKeepsTheHighlightInView pins what a list longer than the body
+// does: it scrolls inside the frame instead of overflowing it, and the
+// highlighted layout stays on screen.
+func TestLayoutPickerKeepsTheHighlightInView(t *testing.T) {
+	var entries []layout.Entry
+	for i := 0; i < 30; i++ {
+		entries = append(entries, layout.Entry{
+			Name: "layout-" + fmt.Sprint(i), Scope: layout.ScopeGlobal,
+			Path: "/tmp/layout-" + fmt.Sprint(i) + ".json", Workspace: "project", Tabs: 1, Panes: 1,
+		})
+	}
+	model := newLayoutPicker(entries, nil)
+	model.width, model.height = 100, 20
+	model.cursor = len(entries) - 1
+
+	lines := strings.Split(model.View(), "\n")
+	if len(lines) > 20 {
+		t.Fatalf("view has %d lines, want at most 20:\n%s", len(lines), model.View())
+	}
+	highlighted := entries[model.cursor].Name
+	if !strings.Contains(model.View(), text.SelectMark) || !strings.Contains(model.View(), highlighted) {
+		t.Fatalf("the highlighted layout %q is not on screen:\n%s", highlighted, model.View())
+	}
+	if !strings.Contains(lines[len(lines)-1], "╰") {
+		t.Fatalf("the frame is not closed:\n%s", model.View())
+	}
+}
+
+// TestWorkspacePickerKeepsTheHighlightInView pins the same scrolling in the
+// workspace prompt.
+func TestWorkspacePickerKeepsTheHighlightInView(t *testing.T) {
+	var workspaces []herdrmock.Workspace
+	for i := 0; i < 30; i++ {
+		workspaces = append(workspaces, herdrmock.Workspace{ID: "w" + fmt.Sprint(i), Label: "workspace-" + fmt.Sprint(i), TabCount: 1, PaneCount: 1})
+	}
+	prompt := &workspacePicker{workspaces: workspaces}
+	prompt.width, prompt.height = 100, 20
+	prompt.cursor = len(workspaces) - 1
+
+	lines := strings.Split(prompt.View(), "\n")
+	if len(lines) > 20 {
+		t.Fatalf("view has %d lines, want at most 20:\n%s", len(lines), prompt.View())
+	}
+	highlighted := workspaces[prompt.cursor].Label
+	if !strings.Contains(prompt.View(), text.SelectMark) || !strings.Contains(prompt.View(), highlighted) {
+		t.Fatalf("the highlighted workspace %q is not on screen:\n%s", highlighted, prompt.View())
+	}
+	if !strings.Contains(lines[len(lines)-1], "╰") {
+		t.Fatalf("the frame is not closed:\n%s", prompt.View())
 	}
 }

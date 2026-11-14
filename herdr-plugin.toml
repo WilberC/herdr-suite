@@ -81,13 +81,21 @@ description = "Show the layouts visible from here in a pane"
 contexts = ["global"]
 command = ["bash", "-c", "exec \"${HERDR_BIN_PATH:-herdr}\" plugin pane open --plugin herdr-suite --entrypoint layouts --placement popup --focus"]
 
+# Both popups are sized in cells to the frame the TUIs draw in, so neither shows
+# a band of unused pane around a centred frame. The space prompts clamp their own
+# size to 60..120 wide and 16..24 tall, and herdr spawns the pane's command in the
+# popup's inner area -- the border takes one cell a side and one more column is
+# reserved (src/popup_size.rs) -- so 120x24 hands the command 117x22, which is a
+# size the prompts draw at whole. herdr clamps a cell size to the terminal it
+# opens in, so a smaller terminal shrinks the popup instead of overflowing it.
+# The layouts table shares the same canvas.
 [[panes]]
 id = "load"
 title = "Load space"
 description = "Pick a stored layout and rebuild it in a new workspace"
 placement = "popup"
-width = "74%"
-height = "50%"
+width = 120
+height = 24
 command = ["bin/hs", "space", "load", "--select"]
 
 [[panes]]
@@ -95,6 +103,6 @@ id = "layouts"
 title = "Layouts"
 description = "The layouts visible from here, their scope and what they hold"
 placement = "popup"
-width = "84%"
-height = "50%"
+width = 120
+height = 24
 command = ["bin/hs", "space", "list", "--pane"]
