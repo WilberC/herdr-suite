@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
+	"github.com/WilberC/herdr-suite/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -143,6 +145,9 @@ type switcher struct {
 	previewWorkspaces []WorkspacePreview
 	previewErr        error
 	previewDone       bool
+
+	width  int
+	height int
 }
 
 func newSwitcher(config SwitcherConfig) *switcher {
@@ -164,6 +169,9 @@ func (s *switcher) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return s, s.handleKey(msg)
+	case tea.WindowSizeMsg:
+		s.width, s.height = msg.Width, msg.Height
+		return s, nil
 	case previewMsg:
 		if msg.name != s.previewName {
 			return s, nil
@@ -362,141 +370,383 @@ func (s *switcher) highlighted() (herdrmock.Session, bool) {
 	return s.matches[s.cursor], true
 }
 
-// hint follows the query the same way the old fzf header did: it invites a
-// name when nothing matches, and lists the binds otherwise.
-func (s *switcher) hint() string {
-	if len(s.sessions) == 0 && s.query == "" {
-		return "no sessions · type a name, enter to create · esc: quit"
-	}
-	if len(s.matches) == 0 && s.query != "" {
-		name, err := Sanitize(s.query)
-		if err != nil {
-			return fmt.Sprintf("enter: %s · esc: quit", err)
-		}
-		return fmt.Sprintf("enter: create '%s' · esc: quit", name)
-	}
-	return "enter: attach · alt-enter: create · ctrl-r: restart · ctrl-s: stop · ctrl-x: delete · esc: quit"
-}
-
+// View renders the switcher: the shared frame, a header naming what the list
+// is sorted by, the live filter, the grouped list, and a footer that details
+// the highlighted session and lists the bindings.
 func (s *switcher) View() string {
-	var view strings.Builder
-	view.WriteString("herdr sessions\n")
-	fmt.Fprintf(&view, "herdr ❯ %s\n\n", s.query)
+	frame := s.frame()
+	width := frame.ContentWidth()
 
-	width := 0
-	for _, session := range s.matches {
-		if n := len([]rune(session.Name)); n > width {
-			width = n
-		}
+	rows := []string{
+		frame.Row(s.headerContent(width)),
+		frame.Rule(),
+		frame.Row(s.filterContent(width)),
 	}
-	rows := make([]string, 0, len(s.matches))
-	for i, session := range s.matches {
-		marker := "  "
-		if i == s.cursor {
-			marker = "> "
-		}
-		rows = append(rows, fmt.Sprintf("%s%s  %s", marker, padName(session.Name, width), state(session)))
-	}
-	view.WriteString(s.columns(rows))
 
-	if s.status != "" {
-		fmt.Fprintf(&view, "\n› %s\n", s.status)
+	body := s.bodyLines(width)
+	body = window(body, s.bodyHeight())
+	for _, line := range body {
+		rows = append(rows, frame.Row(line.styled))
 	}
-	view.WriteString("\n")
+
+	if body := s.statusContent(width); body != "" {
+		rows = append(rows, frame.Row(""), frame.Row(body))
+	}
+	rows = append(rows, frame.Rule(), frame.Row(s.detailContent(width)))
 	if s.pending != nil {
-		fmt.Fprintf(&view, "%s [y/N]\n", promptText(*s.pending))
+		rows = append(rows, frame.Row(s.pendingContent()), frame.Row(s.pendingHints()))
 	} else {
-		view.WriteString(s.hint() + "\n")
+		rows = append(rows, frame.Row(s.hintsContent(width)))
 	}
-	return view.String()
+
+	windowWidth, windowHeight := s.window()
+	return ui.Float(ui.Layout(frame, rows...), windowWidth, windowHeight)
 }
 
-// columns places the session rows beside the preview, padding the list so the
-// divider lines up. Without a preview the rows render exactly as before.
-func (s *switcher) columns(rows []string) string {
-	preview := s.previewLines()
-	if len(preview) == 0 {
-		var plain strings.Builder
-		for _, row := range rows {
-			plain.WriteString(row)
-			plain.WriteString("\n")
-		}
-		return plain.String()
-	}
+const (
+	// switcherDefaultWidth and switcherDefaultHeight are what a view renders
+	// for before the terminal has reported its size.
+	switcherDefaultWidth  = 100
+	switcherDefaultHeight = 30
+	// switcherMaxWidth keeps the surface a popup on a wide terminal instead of
+	// a row of text lost in the middle of the screen.
+	switcherMaxWidth = 100
+	// switcherChrome is every frame line that is not a list row: the two
+	// borders, header, two rules, filter, detail and hints.
+	switcherChrome = 8
+)
 
-	width := minListWidth
-	for _, row := range rows {
-		if n := len([]rune(row)); n > width {
-			width = n
-		}
+// window is the size the view renders for: the reported size, or the default
+// before the first report.
+func (s *switcher) window() (int, int) {
+	width, height := s.width, s.height
+	if width <= 0 {
+		width = switcherDefaultWidth
 	}
-
-	var columns strings.Builder
-	for i := 0; i < len(rows) || i < len(preview); i++ {
-		left, right := "", ""
-		if i < len(rows) {
-			left = rows[i]
-		}
-		if i < len(preview) {
-			right = preview[i]
-		}
-		line := padName(left, width) + "  │ " + right
-		columns.WriteString(strings.TrimRight(line, " "))
-		columns.WriteString("\n")
+	if height <= 0 {
+		height = switcherDefaultHeight
 	}
-	return columns.String()
+	return width, height
 }
 
-const minListWidth = 24
+// frame is the surface every state of the switcher renders inside.
+func (s *switcher) frame() ui.Frame {
+	width, _ := s.window()
+	title := ui.GoldBold.Render("hs") + ui.Quiet.Render(" ❯ ") + ui.AccentBold.Render("sessions")
+	return ui.Frame{Title: title, Width: min(width, switcherMaxWidth)}
+}
 
-// previewPendingGlyph starts the preview while its read is outstanding. A slow
-// session socket otherwise leaves an empty panel that reads as "no workspaces"
-// rather than "still loading".
-const previewPendingGlyph = "⟳"
+// bodyHeight is how many list rows fit under the chrome, leaving room for the
+// status line and the confirmation when they are up.
+func (s *switcher) bodyHeight() int {
+	_, height := s.window()
+	reserved := switcherChrome
+	if s.status != "" {
+		reserved += 2
+	}
+	if s.pending != nil {
+		reserved += 2
+	}
+	return max(1, height-reserved)
+}
 
-// previewLines renders the highlighted session's workspaces: each workspace
-// with its tab and pane counts and herdr's agent state. A session that cannot
-// be read degrades to "unavailable" instead of failing the switcher.
-func (s *switcher) previewLines() []string {
-	if s.preview == nil {
-		return nil
-	}
-	session, ok := s.highlighted()
-	if !ok {
-		return nil
-	}
-
-	header := fmt.Sprintf("session '%s'", session.Name)
-	if !session.Running {
-		return []string{header + " · stopped", "  enter starts it again"}
-	}
-	lines := []string{header}
-	if !s.previewDone {
-		return append(lines, "  "+previewPendingGlyph+" loading")
-	}
-	if s.previewErr != nil {
-		return append(lines, "  unavailable")
-	}
-	if len(s.previewWorkspaces) == 0 {
-		return append(lines, "  no workspaces")
-	}
-
-	for _, workspace := range s.previewWorkspaces {
-		lines = append(lines, "  "+workspace.Label)
-		detail := countLabel(workspace.Tabs, "tab") + " · " + countLabel(workspace.Panes, "pane")
-		if workspace.Agent != "" {
-			detail += " · " + workspace.Agent
+// headerContent names what the list is sorted by on the left and counts the
+// states it holds on the right, so the header answers "what am I looking at".
+func (s *switcher) headerContent(width int) string {
+	running, stopped := 0, 0
+	for _, session := range s.sessions {
+		if session.Running {
+			running++
+		} else {
+			stopped++
 		}
-		lines = append(lines, "    "+detail)
+	}
+
+	left := ui.Label("sort", "running first", ui.AccentBold)
+	right := ui.Muted.Render("esc to close")
+	if len(s.sessions) > 0 {
+		right = ui.Green.Render(ui.Live) + " " + ui.GreenBold.Render(itoa(running)) + " " + ui.Muted.Render("running") +
+			ui.Dot() + ui.Muted.Render(ui.Idle) + " " + ui.Muted.Render(itoa(stopped)) + " " + ui.Muted.Render("stopped") +
+			ui.Dot() + right
+	}
+	return ui.Join(left, right, width)
+}
+
+// filterContent is the live filter field: the query on the left with the block
+// cursor, how much of the list it leaves on the right.
+func (s *switcher) filterContent(width int) string {
+	left := ui.Accent.Render(FilterCue) + " "
+	if s.query == "" {
+		left += ui.Muted.Render("type a session name to filter…")
+	} else {
+		left += ui.Text.Render(s.query) + ui.Accent.Render(ui.Cursor)
+	}
+	if len(s.sessions) == 0 {
+		return ui.Join(left, "", width)
+	}
+	right := ui.Muted.Render(itoa(len(s.matches)) + " / " + itoa(len(s.sessions)) + " shown")
+	return ui.Join(left, right, width)
+}
+
+// bodyLine is one list row: the match it belongs to, and whether it is the
+// highlighted one. A header, a workspace and a placeholder row belong to no
+// match.
+type bodyLine struct {
+	match    int
+	styled   string
+	selected bool
+}
+
+// bodyLines renders the grouped list: a header per state, one row per session,
+// and the highlighted session's workspaces nested under it.
+func (s *switcher) bodyLines(width int) []bodyLine {
+	if len(s.matches) == 0 {
+		if s.query == "" {
+			return s.placeholder("no sessions yet", "type a name, then press enter to create it")
+		}
+		hint := "esc to quit"
+		if name, err := Sanitize(s.query); err == nil {
+			hint = "enter creates '" + name + "' · esc to quit"
+		}
+		return s.placeholder("nothing matches \""+s.query+"\"", hint)
+	}
+
+	nameWidth := max(8, width-24)
+
+	lines := make([]bodyLine, 0, len(s.matches)+6)
+	state := -1
+	for i, session := range s.matches {
+		running := 0
+		if session.Running {
+			running = 1
+		}
+		if running != state {
+			state = running
+			lines = append(lines, bodyLine{match: -1}, bodyLine{match: -1, styled: groupHeader(session.Running, countState(s.matches, running))})
+		}
+
+		last := i == len(s.matches)-1 || s.matches[i+1].Running != session.Running
+		roles := ui.RowRoles(i == s.cursor)
+		body := roles.Name.Render(ui.Clip(session.Name, nameWidth)) + defaultMark(roles, session)
+		row := ui.Row(roles, last, body)
+		if i == s.cursor {
+			row = ui.SelectedRow(row, width)
+		}
+		lines = append(lines, bodyLine{match: i, selected: i == s.cursor, styled: row})
+
+		if i != s.cursor {
+			continue
+		}
+		// The children hang under their session: the continuation column keeps
+		// the parent's guide open, or leaves it blank when the session closes
+		// its group, so a child always starts three cells past its parent.
+		continuation := "  " + " " + "  "
+		if !last {
+			continuation = "  " + ui.Quiet.Render("│") + "  "
+		}
+		lines = append(lines, s.workspaceLines(continuation, width)...)
 	}
 	return lines
 }
 
+// countState counts the matches in one state group.
+func countState(matches []herdrmock.Session, running int) int {
+	count := 0
+	for _, session := range matches {
+		if (session.Running && running == 1) || (!session.Running && running == 0) {
+			count++
+		}
+	}
+	return count
+}
+
+// groupHeader is a section row: the state glyph, the state in small caps and
+// how many sessions it holds.
+func groupHeader(running bool, count int) string {
+	label, glyph := "STOPPED", ui.Idle
+	style, glyphStyle := ui.Muted, ui.Muted
+	if running {
+		label, glyph = "RUNNING", ui.Live
+		style, glyphStyle = ui.GreenBold, ui.Green
+	}
+	return glyphStyle.Render(glyph) + " " + style.Render(label) + "  " + ui.Muted.Render(itoa(count))
+}
+
+// defaultMark is the gold marker of the default session: it outlives the
+// selection, so it keeps its own colour on a tinted row too.
+func defaultMark(roles ui.Roles, session herdrmock.Session) string {
+	if !session.Default {
+		return ""
+	}
+	return roles.Gap(2) + roles.Gold.Render(ui.Mark)
+}
+
+// workspaceLines renders the highlighted session's workspaces as the rows
+// nested under it, with the counts and the agent state in fixed columns.
+func (s *switcher) workspaceLines(continuation string, width int) []bodyLine {
+	rows := make([]bodyLine, 0, len(s.previewWorkspaces)+1)
+	guide := func(last bool) string {
+		return continuation + ui.Guide(ui.Quiet, last) + " "
+	}
+	line := func(last bool, content string) bodyLine {
+		return bodyLine{match: -1, styled: guide(last) + content}
+	}
+
+	session, ok := s.highlighted()
+	if !ok || s.preview == nil {
+		return nil
+	}
+	if !session.Running {
+		return []bodyLine{line(true, ui.Muted.Render("stopped")+ui.Dot()+ui.Muted.Render("enter starts it again"))}
+	}
+	if !s.previewDone {
+		return []bodyLine{line(true, ui.Spinner(0)+" "+ui.Muted.Render("loading workspaces…"))}
+	}
+	if s.previewErr != nil {
+		return []bodyLine{line(true, ui.Red.Render("unavailable"))}
+	}
+	if len(s.previewWorkspaces) == 0 {
+		return []bodyLine{line(true, ui.Muted.Render("no workspaces yet"))}
+	}
+
+	labelWidth, countWidth := 0, 0
+	counts := make([]string, len(s.previewWorkspaces))
+	for i, workspace := range s.previewWorkspaces {
+		labelWidth = max(labelWidth, ui.Width(workspace.Label))
+		counts[i] = countLabel(workspace.Tabs, "tab") + " · " + countLabel(workspace.Panes, "pane")
+		countWidth = max(countWidth, ui.Width(counts[i]))
+	}
+	labelWidth = min(labelWidth, max(8, width/3))
+
+	for i, workspace := range s.previewWorkspaces {
+		content := ui.Fit(ui.Text.Render(workspace.Label), labelWidth)
+		content += "  " + ui.Muted.Render(ui.Fit(counts[i], countWidth))
+		if agent := ui.RowRoles(false).AgentState(workspace.Agent); agent != "" {
+			content += "  " + agent
+		}
+		rows = append(rows, line(i == len(s.previewWorkspaces)-1, content))
+	}
+	return rows
+}
+
+// placeholder centers a calm message in the body: the state on the first line,
+// what to do next on the second.
+func (s *switcher) placeholder(message, hint string) []bodyLine {
+	lines := s.frame().Placeholder(message, hint)
+	rows := make([]bodyLine, 0, len(lines))
+	for _, line := range lines {
+		rows = append(rows, bodyLine{match: -1, styled: line})
+	}
+	return rows
+}
+
+// window keeps the highlighted row in view when the list is longer than the
+// body, centering the visible slice on it.
+func window(lines []bodyLine, height int) []bodyLine {
+	if len(lines) <= height {
+		return lines
+	}
+	cursor := 0
+	for i, line := range lines {
+		if line.selected {
+			cursor = i
+			break
+		}
+	}
+	start := cursor - height/2
+	start = max(0, min(start, len(lines)-height))
+	return lines[start : start+height]
+}
+
+// statusContent is the one-line result of the last action.
+func (s *switcher) statusContent(width int) string {
+	if s.status == "" {
+		return ""
+	}
+	return ui.Teal.Render("›") + " " + ui.Text.Render(s.status)
+}
+
+// detailContent names the highlighted session and its facts: state, the default
+// marker, the socket path, and how many workspaces it holds when the preview is
+// in. The path is the first thing a narrow window drops.
+func (s *switcher) detailContent(width int) string {
+	session, ok := s.highlighted()
+	if !ok {
+		if len(s.sessions) == 0 {
+			return ui.Muted.Render("no session to attach")
+		}
+		return ui.Muted.Render("no match to attach")
+	}
+
+	left := ui.AccentBold.Render(session.Name) + " " + ui.StateGlyph(session.Running) + " " + ui.StateWord(session.Running)
+	if session.Default {
+		left += ui.Dot() + ui.Gold.Render(ui.Mark+" default")
+	}
+
+	right := ""
+	if session.Running && s.previewDone && s.previewErr == nil && len(s.previewWorkspaces) > 0 {
+		noun := "workspaces"
+		if len(s.previewWorkspaces) == 1 {
+			noun = "workspace"
+		}
+		right = ui.TealBold.Render(itoa(len(s.previewWorkspaces))) + " " + ui.Muted.Render(noun)
+	}
+
+	path := ui.ShortPath(session.Socket)
+	room := width - ui.Width(left) - ui.Width(right) - ui.Width(ui.Dot()) - 2
+	switch {
+	case path == "":
+		return ui.Footer(left, right, width)
+	case ui.Width(path) <= room:
+		return ui.Footer(left+ui.Dot()+ui.Muted.Render(path), right, width)
+	case room >= 14:
+		return ui.Footer(left+ui.Dot()+ui.Muted.Render(ui.EllipsisPath(path, room)), right, width)
+	default:
+		return ui.Footer(left, right, width)
+	}
+}
+
+// pendingContent is the confirmation a destructive binding opened, worded by the
+// manager so the model and the CLI cannot drift.
+func (s *switcher) pendingContent() string {
+	return ui.RedBold.Render(promptText(*s.pending) + " [y/N]")
+}
+
+// pendingHints answers the confirmation.
+func (s *switcher) pendingHints() string {
+	return ui.Chip(ui.ChipGold, "y") + " " + ui.Muted.Render("yes") + "  " +
+		ui.Chip(ui.ChipText, "n") + " " + ui.Muted.Render("no, keep it")
+}
+
+// hintsContent is the binding bar: the keys that act on the list, in the order
+// a user reaches for them. A narrow window drops the last ones instead of
+// wrapping.
+func (s *switcher) hintsContent(width int) string {
+	return ui.Hints(width,
+		ui.Hint{Key: "↑↓", Label: "move"},
+		ui.Hint{Key: "enter", Label: "attach"},
+		ui.Hint{Key: "alt+enter", Label: "create"},
+		ui.Hint{Key: "ctrl+r", Label: "restart"},
+		ui.Hint{Key: "ctrl+s", Label: "stop"},
+		ui.Hint{Key: "ctrl+x", Label: "delete"},
+	)
+}
+
+// FilterCue opens the filter field: the glyph the font can always draw, in the
+// accent the field takes when it holds a query.
+const FilterCue = "›"
+
+// itoa is the small integer formatter the view uses; the CLI keeps its own.
+func itoa(value int) string {
+	return strconv.Itoa(value)
+}
+
+// countLabel names a count with the noun agreeing with it.
 func countLabel(count int, noun string) string {
 	if count == 1 {
-		return fmt.Sprintf("%d %s", count, noun)
+		return itoa(count) + " " + noun
 	}
-	return fmt.Sprintf("%d %ss", count, noun)
+	return itoa(count) + " " + noun + "s"
 }
 
 func promptText(action pendingAction) string {

@@ -8,8 +8,19 @@ import (
 	"testing"
 
 	"github.com/WilberC/herdr-suite/internal/herdrmock"
+	"github.com/WilberC/herdr-suite/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// markedRow is the one line the selection bar painted.
+func markedRow(view string) string {
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, ui.SelectMark) {
+			return line
+		}
+	}
+	return ""
+}
 
 type fakePreviewer struct {
 	requests []string
@@ -70,15 +81,20 @@ func TestSwitcherPreviewShowsTheHighlightedSessionWorkspaces(t *testing.T) {
 
 	view := switcher.model.View()
 	for _, want := range []string{
-		"session 'alpha'",
+		"alpha",
 		"project",
-		"3 tabs · 5 panes · working",
+		"3 tabs · 5 panes",
+		"working",
 		"docs",
-		"1 tab · 1 pane · idle",
+		"1 tab · 1 pane",
+		"idle",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view does not contain %q:\n%s", want, view)
 		}
+	}
+	if !strings.Contains(markedRow(view), "alpha") {
+		t.Fatalf("the highlighted session is not the one marked as selected:\n%s", view)
 	}
 	if got, want := previewer.requests, []string{"alpha"}; !equalStrings(got, want) {
 		t.Fatalf("preview requests = %v, want %v", got, want)
@@ -99,10 +115,13 @@ func TestSwitcherPreviewFollowsTheCursor(t *testing.T) {
 	applyPreview(t, switcher, switcher.model.handleKey(tea.KeyMsg{Type: tea.KeyDown}))
 
 	view := switcher.model.View()
-	for _, want := range []string{"session 'beta'", "ci", "1 tab · 2 panes · idle"} {
+	for _, want := range []string{"ci", "1 tab · 2 panes", "idle"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view does not contain %q:\n%s", want, view)
 		}
+	}
+	if marked := markedRow(view); !strings.Contains(marked, "beta") || strings.Contains(marked, "alpha") {
+		t.Fatalf("the highlight did not move to beta:\n%s", view)
 	}
 	if strings.Contains(view, "3 tabs") || strings.Contains(view, "2 tabs") {
 		t.Fatalf("view kept the previous session preview:\n%s", view)
@@ -119,8 +138,11 @@ func TestSwitcherPreviewDegradesWhenTheSessionCannotBeRead(t *testing.T) {
 	applyPreview(t, switcher, switcher.model.Init())
 
 	view := switcher.model.View()
-	if !strings.Contains(view, "session 'alpha'") || !strings.Contains(view, "unavailable") {
+	if !strings.Contains(view, "unavailable") {
 		t.Fatalf("view does not degrade to unavailable:\n%s", view)
+	}
+	if strings.Contains(view, "workspaces") {
+		t.Fatalf("an unreadable session reported a workspace count:\n%s", view)
 	}
 }
 
@@ -133,7 +155,7 @@ func TestSwitcherPreviewSkipsAStoppedSession(t *testing.T) {
 	}
 
 	view := switcher.model.View()
-	for _, want := range []string{"session 'share' · stopped", "enter starts it again"} {
+	for _, want := range []string{"share", "stopped", "enter starts it again"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view does not contain %q:\n%s", want, view)
 		}
@@ -158,7 +180,7 @@ func TestSwitcherPreviewIgnoresAStaleReply(t *testing.T) {
 	switcher.model.Update(stale())
 
 	view := switcher.model.View()
-	if !strings.Contains(view, "session 'beta'") || strings.Contains(view, "7 tabs") {
+	if marked := markedRow(view); !strings.Contains(marked, "beta") || strings.Contains(view, "7 tabs") {
 		t.Fatalf("a stale preview reply replaced the current one:\n%s", view)
 	}
 }
@@ -170,8 +192,10 @@ func TestSwitcherWithoutAPreviewerKeepsThePlainList(t *testing.T) {
 		t.Fatalf("Init issued a command without a previewer")
 	}
 	view := switcher.model.View()
-	if strings.Contains(view, "│") || strings.Contains(view, "session '") {
-		t.Fatalf("view rendered a preview without a previewer:\n%s", view)
+	for _, unwanted := range []string{"├─ project", "workspaces", "loading"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("view rendered a preview without a previewer (%q):\n%s", unwanted, view)
+		}
 	}
 }
 
@@ -190,7 +214,7 @@ func TestSwitcherPreviewShowsAPendingGlyphUntilTheReplyArrives(t *testing.T) {
 		t.Fatalf("no preview command was issued")
 	}
 	view := switcher.model.View()
-	if !strings.Contains(view, "session 'alpha'") || !strings.Contains(view, "⟳ loading") {
+	if !strings.Contains(view, "alpha") || !strings.Contains(view, "loading") {
 		t.Fatalf("a pending preview does not say it is loading:\n%s", view)
 	}
 
@@ -200,7 +224,7 @@ func TestSwitcherPreviewShowsAPendingGlyphUntilTheReplyArrives(t *testing.T) {
 	if strings.Contains(view, "loading") {
 		t.Fatalf("the loading glyph survived the reply:\n%s", view)
 	}
-	if !strings.Contains(view, "1 tab · 2 panes · working") {
+	if !strings.Contains(view, "1 tab · 2 panes") || !strings.Contains(view, "working") {
 		t.Fatalf("view does not show the reply:\n%s", view)
 	}
 }
@@ -213,7 +237,7 @@ func TestSwitcherPreviewGlyphSkipsAStoppedSession(t *testing.T) {
 	if cmd := switcher.model.Init(); cmd != nil {
 		t.Fatalf("a stopped session issued a preview command")
 	}
-	if view := switcher.model.View(); strings.Contains(view, "⟳") {
+	if view := switcher.model.View(); strings.Contains(view, "loading") {
 		t.Fatalf("a stopped session shows a loading glyph:\n%s", view)
 	}
 }

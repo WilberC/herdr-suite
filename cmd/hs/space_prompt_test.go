@@ -9,7 +9,10 @@ import (
 
 	"github.com/WilberC/herdr-suite/internal/layout"
 	"github.com/WilberC/herdr-suite/internal/session"
+	"github.com/WilberC/herdr-suite/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 func pickerFixture() []layout.Entry {
@@ -118,8 +121,8 @@ func TestLayoutPickerRunsTheConfirmedRestoreInProgram(t *testing.T) {
 	if !strings.Contains(view, "restored 'work'") || !strings.Contains(view, "3 steps") {
 		t.Fatalf("the done state does not report the replay:\n%s", view)
 	}
-	if strings.Count(strings.TrimSpace(view), "\n") != 0 {
-		t.Fatalf("the done state is not one line:\n%s", view)
+	if !strings.Contains(view, "hs ❯ space load") {
+		t.Fatalf("the done state left the shared surface:\n%s", view)
 	}
 
 	model.Update(pickerQuitMsg{})
@@ -297,5 +300,279 @@ func TestPickLayoutRunsTheRestoreInsideTheProgram(t *testing.T) {
 	}
 	if want := "loaded layout 'work' into workspace 'project' · 3 steps"; picked.Summary != want {
 		t.Fatalf("summary = %q, want %q", picked.Summary, want)
+	}
+}
+
+// TestLayoutPickerViewFitsTheWindow pins the responsive contract for the picker:
+// the same frame as the switcher, every line inside the window, no wrapping.
+func TestLayoutPickerViewFitsTheWindow(t *testing.T) {
+	for _, size := range []struct {
+		name string
+		w, h int
+	}{
+		{"180x50", 180, 50},
+		{"140x40", 140, 40},
+		{"80x24", 80, 24},
+	} {
+		entries := append(pickerFixture(), layout.Entry{
+			Name:      "a-layout-with-a-name-that-needs-clipping-to-fit",
+			Scope:     layout.ScopePath,
+			Path:      "/home/ana/src/very/deeply/nested/project/.herdr/layouts/a-layout-with-a-name-that-needs-clipping-to-fit.json",
+			Workspace: "a-workspace-with-a-rather-long-name", Tabs: 12, Panes: 34,
+			Modified: time.Now().Add(-3 * time.Hour),
+		})
+		model := newLayoutPicker(entries, nil)
+		model.width, model.height = size.w, size.h
+		lines := strings.Split(model.View(), "\n")
+
+		if len(lines) > size.h {
+			t.Fatalf("%s: view has %d lines, want at most %d", size.name, len(lines), size.h)
+		}
+		for i, line := range lines {
+			if got := ui.Width(line); got > size.w {
+				t.Fatalf("%s: line %d is %d cells wide, want at most %d: %q", size.name, i, got, size.w, line)
+			}
+		}
+		frame := strings.TrimSpace(strings.Join(lines, "\n"))
+		if !strings.Contains(frame, "╭") || !strings.Contains(frame, "╯") {
+			t.Fatalf("%s: the frame is not closed:\n%s", size.name, frame)
+		}
+	}
+}
+
+// TestLayoutPickerMarksExactlyOneSelectedRow pins the selection affordance and
+// the scope grouping: one marked row, and a header per scope the store lists.
+func TestLayoutPickerMarksExactlyOneSelectedRow(t *testing.T) {
+	model := newLayoutPicker(pickerFixture(), nil)
+	model.width, model.height = 140, 40
+
+	for range pickerFixture() {
+		entry := pickerFixture()[model.cursor]
+		var marked []string
+		for _, line := range strings.Split(model.View(), "\n") {
+			if strings.Contains(line, ui.SelectMark) {
+				marked = append(marked, line)
+			}
+		}
+		if len(marked) != 1 {
+			t.Fatalf("view marked %d rows, want exactly one:\n%s", len(marked), strings.Join(marked, "\n"))
+		}
+		if !strings.Contains(marked[0], entry.Name) {
+			t.Fatalf("the marked row is %q, want the highlighted layout %q", marked[0], entry.Name)
+		}
+		model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+}
+
+// TestLayoutPickerFooterFollowsTheSelection pins the footer: the highlighted
+// layout's facts, and the named bindings under them.
+func TestLayoutPickerFooterFollowsTheSelection(t *testing.T) {
+	model := newLayoutPicker(pickerFixture(), nil)
+	model.width, model.height = 140, 40
+
+	footer := lastFooterLine(model.View())
+	for _, want := range []string{"work", "global", "workspace", "project", "2 tabs", "4 panes"} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("the footer does not contain %q:\n%s", want, footer)
+		}
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	footer = lastFooterLine(model.View())
+	if !strings.Contains(footer, "docs") {
+		t.Fatalf("the footer did not follow the highlight:\n%s", footer)
+	}
+	if strings.Contains(footer, "2 tabs") {
+		t.Fatalf("the footer kept the previous layout's facts:\n%s", footer)
+	}
+}
+
+// TestLayoutPickerGroupsByScope pins the hierarchy the picker renders: the
+// project's layouts under a project header, the global ones under theirs.
+func TestLayoutPickerGroupsByScope(t *testing.T) {
+	model := newLayoutPicker([]layout.Entry{
+		{Name: "api", Scope: layout.ScopeProject, Path: "/src/api/.herdr/api.json", Workspace: "api", Tabs: 1, Panes: 2},
+		{Name: "work", Scope: layout.ScopeGlobal, Path: "/tmp/work.json", Workspace: "project", Tabs: 2, Panes: 4},
+	}, nil)
+	model.width, model.height = 100, 30
+
+	view := model.View()
+	projectAt := strings.Index(view, "● PROJECT")
+	globalAt := strings.Index(view, "● GLOBAL")
+	apiAt := strings.Index(view, "api")
+	if projectAt < 0 || globalAt < 0 || apiAt < 0 {
+		t.Fatalf("the picker did not group the list by scope:\n%s", view)
+	}
+	if !(projectAt < apiAt && apiAt < globalAt) {
+		t.Fatalf("the groups are not in store order (project, then global):\n%s", view)
+	}
+}
+
+// TestLayoutPickerEmptyStateIsCalm pins the empty list: a centered message
+// inside the frame and the hint that says how to fill it, never a bare screen.
+func TestLayoutPickerEmptyStateIsCalm(t *testing.T) {
+	model := newLayoutPicker(nil, nil)
+	model.width, model.height = 100, 30
+
+	view := model.View()
+	for _, want := range []string{"no layouts found", "hs space save", "╰"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("the empty picker does not contain %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "● PROJECT") || strings.Contains(view, "● GLOBAL") {
+		t.Fatalf("the empty picker rendered a group header:\n%s", view)
+	}
+}
+
+// lastFooterLine is the detail line of the footer: the interior line above the
+// binding bar.
+func lastFooterLine(view string) string {
+	lines := strings.Split(view, "\n")
+	if len(lines) < 4 {
+		return view
+	}
+	return lines[len(lines)-3]
+}
+
+// TestLayoutPickerGroupRhythm pins the vertical rhythm: the rule that closes the
+// header is followed directly by the first group, and every following group gets
+// exactly one blank row -- never two, which is what a stray leading row produced.
+func TestLayoutPickerGroupRhythm(t *testing.T) {
+	model := newLayoutPicker([]layout.Entry{
+		{Name: "api", Scope: layout.ScopeProject, Path: "/src/api/.herdr/api.json", Workspace: "api", Tabs: 1, Panes: 2},
+		{Name: "work", Scope: layout.ScopeGlobal, Path: "/tmp/work.json", Workspace: "project", Tabs: 2, Panes: 4},
+		{Name: "docs", Scope: layout.ScopePath, Path: "/tmp/docs.json", Workspace: "notes", Tabs: 1, Panes: 1},
+	}, nil)
+	model.width, model.height = 100, 30
+
+	lines := strings.Split(model.View(), "\n")
+	rule := -1
+	for i, line := range lines {
+		if strings.Contains(line, "├") {
+			rule = i
+			break
+		}
+	}
+	if rule < 0 {
+		t.Fatalf("the picker rendered no rule:\n%s", model.View())
+	}
+	if !strings.Contains(lines[rule+1], "● PROJECT") {
+		t.Fatalf("the first group does not follow the rule directly:\n%s", model.View())
+	}
+	for _, want := range []struct {
+		group string
+		index int
+	}{{"● GLOBAL", 0}, {"● PATH", 0}} {
+		at := -1
+		for i, line := range lines {
+			if strings.Contains(line, want.group) {
+				at = i
+				break
+			}
+		}
+		if at < 0 {
+			t.Fatalf("the picker rendered no %q group:\n%s", want.group, model.View())
+		}
+		if blank := interiorBlank(lines[at-1]); !blank {
+			t.Fatalf("%q is not preceded by one blank row:\n%s", want.group, model.View())
+		}
+		if interiorBlank(lines[at-2]) {
+			t.Fatalf("%q is preceded by two blank rows:\n%s", want.group, model.View())
+		}
+	}
+}
+
+// interiorBlank reports whether a view line is an empty interior row: the frame
+// borders are there, nothing between them.
+func interiorBlank(line string) bool {
+	if !strings.Contains(line, "│") {
+		return false
+	}
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '│', '╭', '╮', '╰', '╯', '├', '─', '┤':
+			return -1
+		}
+		return r
+	}, line)) == ""
+}
+
+// selectWithTrueColor renders for one assertion with the truecolor profile
+// forced, so a test can read the role a cell is painted with.
+func selectWithTrueColor(t *testing.T) {
+	t.Helper()
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+}
+
+// selectRoleEscape is the escape a style renders.
+func selectRoleEscape(style lipgloss.Style) string {
+	rendered := style.Render("x")
+	if i := strings.Index(rendered, "x"); i > 0 {
+		return rendered[:i]
+	}
+	return rendered
+}
+
+// tintedRow is the one line of a view that carries the selection tint.
+func tintedRow(t *testing.T, view string) string {
+	t.Helper()
+	var tinted []string
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, selectRoleEscape(ui.SelectionBG)) {
+			tinted = append(tinted, line)
+		}
+	}
+	if len(tinted) != 1 {
+		t.Fatalf("view tinted %d rows, want exactly one:\n%s", len(tinted), strings.Join(tinted, "\n"))
+	}
+	return tinted[0]
+}
+
+// TestLayoutPickerSelectionKeepsItsFacts pins the selection surface in the
+// picker: the tinted row keeps its name, workspace, counts and age, and those
+// facts use the lifted muted role instead of the panel one.
+func TestLayoutPickerSelectionKeepsItsFacts(t *testing.T) {
+	selectWithTrueColor(t)
+	entries := pickerFixture()
+	entries[0].Modified = time.Now().Add(-2 * time.Hour)
+	model := newLayoutPicker(entries, nil)
+	model.width, model.height = 140, 40
+
+	row := tintedRow(t, model.View())
+	for _, want := range []string{"work", "project", "2 tabs · 4 panes", "2h ago"} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("the selected layout lost %q on the tint: %q", want, row)
+		}
+	}
+	if !strings.Contains(row, selectRoleEscape(ui.MutedOnSelection)) {
+		t.Fatalf("the selected row's facts are not lifted onto the tint: %q", row)
+	}
+	if !strings.Contains(row, selectRoleEscape(ui.TextOnSelection)) {
+		t.Fatalf("the selected layout's name is not painted with the selection text role: %q", row)
+	}
+	if !strings.Contains(row, ui.SelectMark) || !strings.ContainsAny(row, "├└") {
+		t.Fatalf("the selected row lost its edge or its guide: %q", row)
+	}
+	if strings.Contains(row, selectRoleEscape(ui.Muted)) {
+		t.Fatalf("the selected row's facts kept the panel muted tone: %q", row)
+	}
+}
+
+// TestWorkspacePickerSelectionKeepsTheAgentState pins that a selected row keeps
+// the colours that carry meaning: the agent state stays green on the tint.
+func TestWorkspacePickerSelectionKeepsTheAgentState(t *testing.T) {
+	selectWithTrueColor(t)
+	model := &workspacePicker{workspaces: captureWorkspaceList()}
+	model.width, model.height = 140, 40
+
+	row := tintedRow(t, model.View())
+	if !strings.Contains(row, "project") || !strings.Contains(row, "working") {
+		t.Fatalf("the selected workspace lost its facts: %q", row)
+	}
+	if !strings.Contains(row, selectRoleEscape(ui.RowRoles(true).Green)) {
+		t.Fatalf("the agent state lost its colour on the tint: %q", row)
 	}
 }
