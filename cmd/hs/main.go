@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/WilberC/herdr-suite/internal/layout"
 	"github.com/WilberC/herdr-suite/internal/pathshim"
 	"github.com/WilberC/herdr-suite/internal/session"
+	"github.com/WilberC/tui-kit/theme"
 	"github.com/mattn/go-isatty"
 )
 
@@ -231,6 +233,7 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 // old fzf flow used: ctrl-r leaves the stopped name in a temp file, and the
 // attach happens after the switcher closes.
 func defaultSwitcher(d deps, out io.Writer) func(context.Context) (string, error) {
+	_ = theme.Use(theme.Auto(d.getenv("HS_THEME"), hsThemeDir()))
 	return func(ctx context.Context) (string, error) {
 		flag, err := os.CreateTemp("", "hs-restart-*")
 		if err != nil {
@@ -568,4 +571,18 @@ func hasHelp(args []string) bool {
 		}
 	}
 	return false
+}
+
+// hsThemeDir is where a custom theme's JSON file lives: the platform's config
+// directory, under hs/themes. The HS_THEME setting names a file in it —
+// "gruvbox" loads gruvbox.json — and every failure to load one, like a
+// missing file or a broken one, leaves the built-in Tokyo Night palette in
+// force. With no setting the switcher asks the terminal for its own colours
+// and renders the theme the terminal describes.
+var hsThemeDir = func() string {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "hs", "themes")
 }
