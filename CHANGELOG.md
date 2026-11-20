@@ -4,6 +4,14 @@ All notable changes to herdr-suite are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Closing the session switcher or a space picker no longer risks feeding the
+  shell terminal-reply bytes as keystrokes: hs drains pending palette and
+  capability replies from the tty after every interactive surface exits.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

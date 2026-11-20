@@ -220,9 +220,11 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 	d.switcher = defaultSwitcher(d, stdout)
 	if d.interactive {
 		d.pick = func(workspaces []herdrmock.Workspace) (string, error) {
+			defer settleStdin()
 			return pickWorkspace(os.Stdin, stdout, workspaces)
 		}
 		d.pickLayout = func(entries []layout.Entry, restore layoutRestore) (layoutPick, error) {
+			defer settleStdin()
 			return pickLayout(os.Stdin, stdout, entries, restore)
 		}
 	}
@@ -255,8 +257,10 @@ func defaultSwitcher(d deps, out io.Writer) func(context.Context) (string, error
 			return "", err
 		}
 		if err := switcher.Run(os.Stdin, out); err != nil {
+			settleStdin()
 			return "", err
 		}
+		settleStdin()
 		return switcher.Target(), nil
 	}
 }
