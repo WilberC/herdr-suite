@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -739,5 +740,57 @@ func TestSwitcherHintPageResetsWhenTheConfirmationCloses(t *testing.T) {
 
 	if view := switcher.model.View(); !strings.Contains(view, "more 1/2") {
 		t.Fatalf("the bar kept a page from the confirmation's hints:\n%s", view)
+	}
+}
+
+// TestSwitcherClosesOnTheAlternateScreen pins the exit cleanliness: the switcher
+// renders inline, so the frame it prints would stay in the pane after it quits
+// unless the program runs on the alternate screen and hands the pane back the
+// way it found it.
+func TestSwitcherClosesOnTheAlternateScreen(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	switcher, _, _, _ := newSwitcherFixture(t, herdrmock.Session{Name: "work", Running: true})
+	var out bytes.Buffer
+	_ = switcher.Run(strings.NewReader("\x1b"), &out)
+	if got := out.String(); !strings.Contains(got, "\x1b[?1049h") {
+		t.Fatalf("Run never entered the alternate screen:\n%q", got)
+	}
+	if got := out.String(); !strings.Contains(got, "\x1b[?1049l") {
+		t.Fatalf("Run never left the alternate screen:\n%q", got)
+	}
+}
+
+// TestSwitcherClearsThePaneWithoutAnAltscreen pins the fallback: a terminal
+// whose TERM names no real buffer cannot swap screens, so the switcher quits
+// inline and erases the frame it left behind, the way ctrl+l clears a shell.
+func TestSwitcherClearsThePaneWithoutAnAltscreen(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	switcher, _, _, _ := newSwitcherFixture(t, herdrmock.Session{Name: "work", Running: true})
+	var out bytes.Buffer
+	_ = switcher.Run(strings.NewReader("\x1b"), &out)
+	if got := out.String(); strings.Contains(got, "\x1b[?1049h") {
+		t.Fatalf("a dumb terminal was asked for an alternate screen:\n%q", got)
+	}
+	if got := out.String(); !strings.Contains(got, "\x1b[2J") || !strings.Contains(got, "\x1b[H") {
+		t.Fatalf("Run never cleared the printed frame:\n%q", got)
+	}
+}
+
+func TestAltscreenAvailable(t *testing.T) {
+	cases := []struct {
+		term string
+		want bool
+	}{
+		{"xterm-256color", true},
+		{"linux", true},
+		{"XTERM-256COLOR", true},
+		{"dumb", false},
+		{"DUMB", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := AltscreenAvailable(c.term); got != c.want {
+			t.Errorf("AltscreenAvailable(%q) = %v, want %v", c.term, got, c.want)
+		}
 	}
 }

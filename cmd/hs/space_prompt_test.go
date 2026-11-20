@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -792,5 +793,42 @@ func TestWorkspacePickerKeepsTheHighlightInView(t *testing.T) {
 	}
 	if !strings.Contains(lines[len(lines)-1], "╰") {
 		t.Fatalf("the frame is not closed:\n%s", prompt.View())
+	}
+}
+
+// TestPickerClosesOnTheAlternateScreen pins the exit cleanliness the switcher
+// already pins: a picker running inline prints its last frame into the pane on
+// exit, so it runs on the alternate screen and hands the pane back as found.
+func TestPickerClosesOnTheAlternateScreen(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	var out bytes.Buffer
+	// esc is a clean exit here, so the cancelled pick is expected.
+	_, err := pickWorkspace(strings.NewReader("\x1b"), &out, []herdrmock.Workspace{{ID: "w-1"}})
+	if !errors.Is(err, session.ErrCancelled) {
+		t.Fatalf("pickWorkspace error = %v, want ErrCancelled", err)
+	}
+	if got := out.String(); !strings.Contains(got, "\x1b[?1049h") {
+		t.Fatalf("the picker never entered the alternate screen:\n%q", got)
+	}
+	if got := out.String(); !strings.Contains(got, "\x1b[?1049l") {
+		t.Fatalf("the picker never left the alternate screen:\n%q", got)
+	}
+}
+
+// TestPickerClearsThePaneWithoutAnAltscreen pins the fallback: without a real
+// TERM the picker quits inline and erases the frame it left behind instead of
+// leaving it printed in the pane.
+func TestPickerClearsThePaneWithoutAnAltscreen(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	var out bytes.Buffer
+	_, err := pickWorkspace(strings.NewReader("\x1b"), &out, []herdrmock.Workspace{{ID: "w-1"}})
+	if !errors.Is(err, session.ErrCancelled) {
+		t.Fatalf("pickWorkspace error = %v, want ErrCancelled", err)
+	}
+	if got := out.String(); strings.Contains(got, "\x1b[?1049h") {
+		t.Fatalf("a dumb terminal was asked for an alternate screen:\n%q", got)
+	}
+	if got := out.String(); !strings.Contains(got, "\x1b[2J") || !strings.Contains(got, "\x1b[H") {
+		t.Fatalf("the picker never cleared the printed frame:\n%q", got)
 	}
 }

@@ -104,14 +104,24 @@ func (s *Switcher) Prepare(ctx context.Context) error {
 // (src/client/shell/mouse.rs "MouseEventKind::Moved if hit.mouse_reporting"), and
 // its host terminal is in any-event tracking.
 func (s *Switcher) Run(in io.Reader, out io.Writer) error {
-	_, err := tea.NewProgram(s.model, programOptions(in, out)...).Run()
+	altscreen := AltscreenAvailable(os.Getenv("TERM"))
+	_, err := tea.NewProgram(s.model, programOptions(in, out, altscreen)...).Run()
+	if !altscreen {
+		ClearResidue(out)
+	}
 	return err
 }
 
 // programOptions is what the switcher asks the terminal for: the streams the
-// caller handed in, and all-motion mouse reporting for the hover.
-func programOptions(in io.Reader, out io.Writer) []tea.ProgramOption {
+// caller handed in, all-motion mouse reporting for the hover, and the alternate
+// screen when the terminal can swap buffers. Without the swap the inline render
+// would leave the last frame printed in the pane on quit, which is why a
+// terminal without one gets ClearResidue after the program exits instead.
+func programOptions(in io.Reader, out io.Writer, altscreen bool) []tea.ProgramOption {
 	options := []tea.ProgramOption{tea.WithOutput(out), tea.WithMouseAllMotion()}
+	if altscreen {
+		options = append(options, tea.WithAltScreen())
+	}
 	if in != nil {
 		options = append(options, tea.WithInput(in))
 	}

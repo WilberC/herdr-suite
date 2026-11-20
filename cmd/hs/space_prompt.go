@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -25,8 +26,12 @@ import (
 // stored workspace is not the active one.
 func pickWorkspace(in io.Reader, out io.Writer, workspaces []herdrmock.Workspace) (string, error) {
 	model := &workspacePicker{workspaces: workspaces}
-	if _, err := tea.NewProgram(model, pickerOptions(in, out)...).Run(); err != nil {
+	altscreen := session.AltscreenAvailable(os.Getenv("TERM"))
+	if _, err := tea.NewProgram(model, pickerOptions(in, out, altscreen)...).Run(); err != nil {
 		return "", err
+	}
+	if !altscreen {
+		session.ClearResidue(out)
 	}
 	if model.cancelled {
 		return "", session.ErrCancelled
@@ -35,12 +40,18 @@ func pickWorkspace(in io.Reader, out io.Writer, workspaces []herdrmock.Workspace
 }
 
 // pickerOptions is what a prompt asks the terminal for: the streams the caller
-// handed in, and all-motion mouse reporting, which is what a hover needs. herdr
-// forwards a moved event to a popup pane whose program enabled mouse reporting
-// (src/client/shell/mouse.rs "MouseEventKind::Moved if hit.mouse_reporting"), and
-// its host terminal is in any-event tracking.
-func pickerOptions(in io.Reader, out io.Writer) []tea.ProgramOption {
+// handed in, all-motion mouse reporting for the hover (herdr forwards a moved
+// event to a popup pane whose program enabled mouse reporting,
+// src/client/shell/mouse.rs "MouseEventKind::Moved if hit.mouse_reporting"), and
+// the alternate screen when the terminal can swap buffers. Without the swap the
+// inline render would leave the last frame printed in the pane on quit, which is
+// why a terminal without one gets session.ClearResidue after the program exits
+// instead.
+func pickerOptions(in io.Reader, out io.Writer, altscreen bool) []tea.ProgramOption {
 	options := []tea.ProgramOption{tea.WithOutput(out), tea.WithMouseAllMotion()}
+	if altscreen {
+		options = append(options, tea.WithAltScreen())
+	}
 	if in != nil {
 		options = append(options, tea.WithInput(in))
 	}
@@ -334,8 +345,12 @@ const (
 // asks: it is the dry-run pick, which has nothing to report.
 func pickLayout(in io.Reader, out io.Writer, entries []layout.Entry, restore layoutRestore) (layoutPick, error) {
 	model := newLayoutPicker(entries, restore)
-	if _, err := tea.NewProgram(model, pickerOptions(in, out)...).Run(); err != nil {
+	altscreen := session.AltscreenAvailable(os.Getenv("TERM"))
+	if _, err := tea.NewProgram(model, pickerOptions(in, out, altscreen)...).Run(); err != nil {
 		return layoutPick{}, err
+	}
+	if !altscreen {
+		session.ClearResidue(out)
 	}
 	return pickResult(model)
 }
