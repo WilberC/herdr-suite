@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
 ### Added
 
 - GS session restore writes herdr's own `HERDR_INTEGRATION_VERSION` marker
