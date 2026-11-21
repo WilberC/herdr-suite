@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -33,7 +34,9 @@ func newGSRun(t *testing.T) *gsRun {
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := []byte(gsrestore.ReporterVersionLine + "\n// shipped reporter body\n")
+	source := []byte(gsrestore.IntegrationIDLine + "\n" +
+		gsrestore.IntegrationVersionLine(gsrestore.ShippedIntegrationVersion) + "\n" +
+		gsrestore.ReporterVersionLine + "\n// shipped reporter body\n")
 	if err := os.WriteFile(sourcePath, source, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -262,6 +265,7 @@ func TestGSRestoreStatusReportsTheDefaultState(t *testing.T) {
 		"agent dir:    " + run.agentDir,
 		"reporter:     not installed",
 		"version:      no reporter installed",
+		"integration:  no reporter installed",
 		"backup:       none",
 		"gentle-shell: not resolvable",
 		"",
@@ -291,6 +295,7 @@ func TestGSRestoreStatusReportsAnInstalledReporterAndConfig(t *testing.T) {
 		"agent dir:    " + run.agentDir,
 		"reporter:     installed at " + run.reporterPath(),
 		"version:      matches (v1)",
+		"integration:  v9 (herdr did not report a pi version; written for v9)",
 		"backup:       none",
 		"gentle-shell: not resolvable",
 		"",
@@ -323,6 +328,7 @@ func TestGSRestoreStatusReportsABackupAndADifferentVersion(t *testing.T) {
 		"agent dir:    " + run.agentDir,
 		"reporter:     installed at " + run.reporterPath(),
 		"version:      differs (installed v0, shipped v1)",
+		"integration:  no HERDR_INTEGRATION_VERSION marker",
 		"backup:       present at " + backup,
 		"gentle-shell: not resolvable",
 		"",
@@ -713,6 +719,9 @@ func TestGSRestoreStatusJSONMirrorsTheHumanReport(t *testing.T) {
 	if document.Backup != "" || lines["backup"] != "none" {
 		t.Fatalf("backup = %q, human line = %q, want none", document.Backup, lines["backup"])
 	}
+	if document.IntegrationVersion != 0 || lines["integration"] != "no reporter installed" {
+		t.Fatalf("integration = %d, human line = %q, want no reporter", document.IntegrationVersion, lines["integration"])
+	}
 	if document.GentleShell != "" || lines["gentle-shell"] != "not resolvable" {
 		t.Fatalf("gentle-shell = %q, human line = %q, want unresolved", document.GentleShell, lines["gentle-shell"])
 	}
@@ -798,5 +807,172 @@ func TestGSRestoreStartupSuffixesASlowAutoInstall(t *testing.T) {
 	want := "herdr-suite: installed GS session restore reporter at " + run.reporterPath() + " (took 2.5s)\n"
 	if got := run.stderr.String(); got != want {
 		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+// integration makes the herdr probe answer with text, or fail when err is set.
+func (r *gsRun) integration(text string, err error) {
+	r.d.integrationStatus = func(context.Context) (string, error) {
+		return text, err
+	}
+}
+
+func (r *gsRun) installed(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(r.reporterPath())
+	if err != nil {
+		t.Fatalf("read the installed reporter: %v", err)
+	}
+	return data
+}
+
+func TestGSRestoreInstallWritesTheHerdrIntegrationMarkerFromHerdr(t *testing.T) {
+	run := newGSRun(t)
+	run.integration("pi: outdated (v9 < v10) (/tmp/extensions/herdr-agent-state.ts)\n", nil)
+
+	code := run.run(t, "gs-restore", "install")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	data := string(run.installed(t))
+	if !strings.Contains(data, gsrestore.IntegrationVersionLine(10)) {
+		t.Fatalf("installed reporter =\n%s\nwant the %q line", data, gsrestore.IntegrationVersionLine(10))
+	}
+	if !strings.Contains(data, gsrestore.IntegrationIDLine) {
+		t.Fatalf("installed reporter =\n%s\nwant the %q line", data, gsrestore.IntegrationIDLine)
+	}
+}
+
+func TestGSRestoreInstallFallsBackToTheShippedIntegrationVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		err  error
+	}{
+		{name: "herdr cannot be run", err: exec.ErrNotFound},
+		{name: "herdr does not report pi", text: "pi: not installed (/tmp/extensions/herdr-agent-state.ts)\n"},
+		{name: "herdr output does not parse", text: "not herdr output\n"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := newGSRun(t)
+			run.integration(test.text, test.err)
+
+			code := run.run(t, "gs-restore", "install")
+
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+			}
+			if run.stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want the install to stay silent about herdr", run.stderr)
+			}
+			if data := string(run.installed(t)); !strings.Contains(data, gsrestore.IntegrationVersionLine(gsrestore.ShippedIntegrationVersion)) {
+				t.Fatalf("installed reporter =\n%s\nwant the shipped default %d",
+					data, gsrestore.ShippedIntegrationVersion)
+			}
+		})
+	}
+}
+
+func TestGSRestoreStartupRewritesADifferentIntegrationMarker(t *testing.T) {
+	run := newGSRun(t)
+	run.writeConfig(t, `{"gs_restore": {"install": true, "auto_install": true}}`)
+	run.integration("pi: current (v9) (/tmp/extensions/herdr-agent-state.ts)\n", nil)
+
+	if code := run.run(t, "gs-restore", "startup"); code != 0 {
+		t.Fatalf("first startup exit = %d\nstderr:\n%s", code, run.stderr)
+	}
+	run.stderr.Reset()
+
+	run.integration("pi: outdated (v9 < v10) (/tmp/extensions/herdr-agent-state.ts)\n", nil)
+	if code := run.run(t, "gs-restore", "startup"); code != 0 {
+		t.Fatalf("second startup exit = %d\nstderr:\n%s", code, run.stderr)
+	}
+	backup := run.reporterPath() + ".bak-20261112T200000"
+	want := "herdr-suite: backed up the previous reporter to " + backup + "\n" +
+		"herdr-suite: installed GS session restore reporter at " + run.reporterPath() + "\n"
+	if got := run.stderr.String(); got != want {
+		t.Fatalf("second startup stderr = %q, want %q", got, want)
+	}
+	if data := string(run.installed(t)); !strings.Contains(data, gsrestore.IntegrationVersionLine(10)) {
+		t.Fatalf("installed reporter =\n%s\nwant the marker rewritten to 10", data)
+	}
+
+	run.stderr.Reset()
+	if code := run.run(t, "gs-restore", "startup"); code != 0 {
+		t.Fatalf("third startup exit = %d", code)
+	}
+	if run.stderr.Len() != 0 {
+		t.Fatalf("third startup stderr = %q, want silence once the marker matches", run.stderr)
+	}
+}
+
+func TestGSRestoreStatusReportsTheIntegrationMarker(t *testing.T) {
+	run := newGSRun(t)
+	run.integration("pi: current (v10) (/tmp/extensions/herdr-agent-state.ts)\n", nil)
+	if code := run.run(t, "gs-restore", "install"); code != 0 {
+		t.Fatalf("install exit = %d\n%s", code, run.stderr)
+	}
+	run.stdout.Reset()
+
+	code := run.run(t, "gs-restore", "status")
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, run.stderr)
+	}
+	want := "integration:  v10 (herdr expects v10; written for v9)"
+	if !strings.Contains(run.stdout.String(), want) {
+		t.Fatalf("stdout =\n%s\nwant %q", run.stdout, want)
+	}
+
+	run.stdout.Reset()
+	if code := run.run(t, "gs-restore", "status", "--json"); code != 0 {
+		t.Fatalf("status --json exit = %d\n%s", code, run.stderr)
+	}
+	var document gsrestore.StatusDocument
+	if err := json.Unmarshal(run.stdout.Bytes(), &document); err != nil {
+		t.Fatalf("stdout is not the status document: %v\n%s", err, run.stdout)
+	}
+	if document.IntegrationVersion != 10 || document.IntegrationExpected != 10 {
+		t.Fatalf("integration = installed %d, expected %d, want 10 and 10",
+			document.IntegrationVersion, document.IntegrationExpected)
+	}
+	if document.IntegrationShipped != gsrestore.ShippedIntegrationVersion || !document.IntegrationDiffers {
+		t.Fatalf("integration = shipped %d, differs %v, want %d and true",
+			document.IntegrationShipped, document.IntegrationDiffers, gsrestore.ShippedIntegrationVersion)
+	}
+}
+
+// TestGSRestoreInstallStatusRoundTripKeepsThePreviousBehavior pins the install
+// and status contract that shipped before the herdr marker existed.
+func TestGSRestoreInstallStatusRoundTripKeepsThePreviousBehavior(t *testing.T) {
+	run := newGSRun(t)
+
+	if code := run.run(t, "gs-restore", "install"); code != 0 {
+		t.Fatalf("install exit = %d\n%s", code, run.stderr)
+	}
+	want := "installed: " + run.reporterPath() + "\nversion:   v1\n"
+	if got := run.stdout.String(); got != want {
+		t.Fatalf("install stdout = %q, want %q", got, want)
+	}
+	if data := string(run.installed(t)); data != string(run.source) {
+		t.Fatalf("installed reporter =\n%s\nwant the shipped bytes", data)
+	}
+
+	run.stdout.Reset()
+	if code := run.run(t, "gs-restore", "status"); code != 0 {
+		t.Fatalf("status exit = %d\n%s", code, run.stderr)
+	}
+	for _, want := range []string{
+		"reporter:     installed at " + run.reporterPath(),
+		"version:      matches (v1)",
+		"backup:       none",
+		"gentle-shell: not resolvable",
+	} {
+		if !strings.Contains(run.stdout.String(), want) {
+			t.Fatalf("stdout =\n%s\nwant %q", run.stdout, want)
+		}
 	}
 }

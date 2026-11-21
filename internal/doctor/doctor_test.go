@@ -21,18 +21,19 @@ import (
 // piece is a file under one temp directory and every call is a function, so a
 // test can break exactly one thing.
 type harness struct {
-	t           *testing.T
-	root        string
-	cwd         string
-	herdrPath   string
-	env         map[string]string
-	herdrOut    string
-	herdrErr    error
-	sessions    int
-	pingErr     error
-	pingBlocks  bool
-	gentleShell string
-	d           Deps
+	t              *testing.T
+	root           string
+	cwd            string
+	herdrPath      string
+	env            map[string]string
+	herdrOut       string
+	herdrErr       error
+	integrationOut string
+	sessions       int
+	pingErr        error
+	pingBlocks     bool
+	gentleShell    string
+	d              Deps
 }
 
 func newHarness(t *testing.T) *harness {
@@ -70,6 +71,9 @@ func newHarness(t *testing.T) *harness {
 		RunHerdr: func(ctx context.Context, bin string, args ...string) ([]byte, []byte, error) {
 			if h.herdrErr != nil {
 				return nil, nil, h.herdrErr
+			}
+			if len(args) > 0 && args[0] == "integration" {
+				return []byte(h.integrationOut), nil, nil
 			}
 			return []byte(h.herdrOut), nil, nil
 		},
@@ -137,7 +141,9 @@ func (h *harness) reporterPath() string {
 
 func (h *harness) installReporter(marker string) {
 	h.t.Helper()
-	h.writeFile(h.reporterPath(), "// HERDR_SUITE_GS_RESTORE_VERSION="+marker+"\n// reporter body\n")
+	h.writeFile(h.reporterPath(), "// HERDR_INTEGRATION_ID=pi\n"+
+		gsrestore.IntegrationVersionLine(gsrestore.ShippedIntegrationVersion)+"\n"+
+		"// HERDR_SUITE_GS_RESTORE_VERSION="+marker+"\n// reporter body\n")
 }
 
 func (h *harness) writeFile(path, body string) {
@@ -188,7 +194,7 @@ func TestDoctorReportsAHealthyInstallation(t *testing.T) {
 	wantIDs := []string{
 		"herdr", "socket", "config", "binary", "layouts", "project",
 		"gs-restore reporter", "gs-restore version", "gs-restore backup", "gs-restore launcher",
-		"manifest",
+		"gs-restore integration", "manifest",
 	}
 	if got := checkIDs(report); strings.Join(got, ",") != strings.Join(wantIDs, ",") {
 		t.Fatalf("report checks = %v, want %v", got, wantIDs)
@@ -204,6 +210,7 @@ func TestDoctorReportsAHealthyInstallation(t *testing.T) {
 	h.assertCheck(report, "gs-restore version", Skip, "no reporter installed")
 	h.assertCheck(report, "gs-restore backup", Pass, "none")
 	h.assertCheck(report, "gs-restore launcher", Skip, "not checked; no reporter installed")
+	h.assertCheck(report, "gs-restore integration", Skip, "no reporter installed")
 	h.assertCheck(report, "manifest", Pass, h.manifestPath()+" · Herd Suite 0.2.0 (min_herdr_version 0.7.5)")
 }
 
@@ -513,7 +520,7 @@ func TestDoctorSkipsGSRestoreWithoutAnAgentDirectory(t *testing.T) {
 
 	report := Run(h.d)
 
-	for _, id := range []string{"gs-restore reporter", "gs-restore version", "gs-restore backup", "gs-restore launcher"} {
+	for _, id := range []string{"gs-restore reporter", "gs-restore version", "gs-restore backup", "gs-restore launcher", "gs-restore integration"} {
 		check := h.check(report, id)
 		if check.Status != Skip {
 			t.Errorf("%s status = %s, want SKIP", id, check.Status)
@@ -642,4 +649,45 @@ func render(t *testing.T, report Report) string {
 		t.Fatalf("Write error = %v", err)
 	}
 	return out.String()
+}
+
+func TestDoctorReportsTheIntegrationMarkerAsInformation(t *testing.T) {
+	h := newHarness(t)
+	h.writeFile(h.reporterPath(), "// HERDR_INTEGRATION_ID=pi\n"+
+		gsrestore.IntegrationVersionLine(10)+"\n"+
+		"// HERDR_SUITE_GS_RESTORE_VERSION=1\n// reporter body\n")
+	h.integrationOut = "pi: current (v10) (/tmp/extensions/herdr-agent-state.ts)\n"
+
+	report := Run(h.d)
+
+	h.assertCheck(report, "gs-restore integration", Pass, "v10 matches herdr (written for v9)")
+	if report.ExitCode() != 0 {
+		t.Fatalf("exit = %d, want 0: a newer herdr integration is information, not a failure", report.ExitCode())
+	}
+}
+
+func TestDoctorWarnsBeforeAnOutdatedIntegrationMarker(t *testing.T) {
+	h := newHarness(t)
+	h.installReporter("1")
+	h.integrationOut = "pi: outdated (v9 < v10) (/tmp/extensions/herdr-agent-state.ts)\n"
+
+	report := Run(h.d)
+
+	h.assertCheck(report, "gs-restore integration", Warn,
+		"installed v9, herdr expects v10; run hs gs-restore install")
+	if report.ExitCode() != 0 {
+		t.Fatalf("exit = %d, want 0: a warning is not a failure", report.ExitCode())
+	}
+}
+
+func TestDoctorSkipsTheIntegrationCheckWithoutHerdrsAnswer(t *testing.T) {
+	h := newHarness(t)
+	h.installReporter("1")
+
+	report := Run(h.d)
+
+	h.assertCheck(report, "gs-restore integration", Skip, "v9 installed; herdr did not report a pi version")
+	if report.ExitCode() != 0 {
+		t.Fatalf("exit = %d, want 0", report.ExitCode())
+	}
 }

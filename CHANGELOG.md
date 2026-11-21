@@ -6,6 +6,17 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- GS session restore writes herdr's own `HERDR_INTEGRATION_VERSION` marker
+  into the reporter with the pi version the installed herdr expects, read from
+  `herdr integration status` (shipped default `9` when herdr cannot be asked or
+  its text names no version). Official herdr now reports `pi: current` instead
+  of `pi: outdated (legacy < vN)`, the `[[startup]]` hook refreshes the marker
+  when herdr's expectation changes and stays silent when it already matches,
+  and `hs gs-restore status` and `hs doctor` report the marker and any newer
+  herdr expectation as information.
+
 ### Fixed
 
 - Closing the session switcher or a space picker no longer risks feeding the

@@ -69,6 +69,18 @@ func (c *Client) ListSessions(ctx context.Context) ([]herdrmock.Session, error) 
 	return sessions, nil
 }
 
+// IntegrationStatus returns the text of "herdr integration status": one line
+// per agent integration, naming the version herdr expects for an outdated one.
+// herdr only reports and never rewrites an installed integration, so the
+// caller decides what to do with it.
+func (c *Client) IntegrationStatus(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, herdrmock.Target{}, "integration", "status")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 // StopSession stops a running session.
 func (c *Client) StopSession(ctx context.Context, name string) error {
 	_, err := c.run(ctx, herdrmock.Target{}, "session", "stop", name)

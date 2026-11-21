@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -26,6 +27,9 @@ The reporter overrides how a pane restores its session, so a gentle-shell sessio
 comes back through the gentle-shell launcher instead of vanilla pi. It installs
 into the gentle-shell agent directory named by PI_CODING_AGENT_DIR; a vanilla pi
 installation has no such directory and the feature does not apply there.
+
+The install also writes herdr's own pi integration marker with the version the
+installed herdr expects, so "herdr integration status" reports pi as current.
 `
 
 const gsRestoreInstallUsage = `usage: hs gs-restore install [--force]
@@ -34,6 +38,11 @@ Copy the shipped reporter into $PI_CODING_AGENT_DIR/extensions. An existing
 herdr reporter is backed up next to it first, and a repeated install refreshes
 that single backup. A file that is not a herdr reporter is refused unless
 --force is passed.
+
+The install stamps herdr's pi integration marker with the version the installed
+herdr expects, read from "herdr integration status". A herdr that cannot be run
+or whose text names no version leaves the shipped default in place, and never
+fails the install.
 
 Options:
   --force  Replace a file that is not a herdr reporter, keeping a backup
@@ -48,8 +57,10 @@ when no backup exists. A removal with nothing installed reports that and exits 0
 const gsRestoreStatusUsage = `usage: hs gs-restore status [options]
 
 Report whether the reporter is installed, whether its version marker matches
-this build, whether a backup exists, whether the gentle-shell launcher is
-resolvable, and the config toggle states.
+this build, which herdr integration version it carries and which one the
+installed herdr expects, whether a backup exists, whether the gentle-shell
+launcher is resolvable, and the config toggle states. A herdr that expects a pi
+version other than the shipped 9 is reported as information, not a failure.
 
 Options:
   --json  Print the report as one JSON document carrying the same fields
@@ -130,7 +141,28 @@ func installReporter(d deps, force bool) (gsrestore.InstallResult, error) {
 	if err != nil {
 		return gsrestore.InstallResult{}, fmt.Errorf("read the shipped reporter %s: %w", source, err)
 	}
-	return gsrestore.Install(target, reporter, force, d.clock()())
+	integration, _ := gsrestore.IntegrationVersion(d.piIntegrationStatus())
+	return gsrestore.Install(target, gsrestore.WithIntegration(reporter, integration), force, d.clock()())
+}
+
+// piIntegrationStatus asks the installed herdr which pi integration version it
+// expects. Every failure is silence: the install then keeps the shipped default,
+// so a missing or broken herdr never blocks the reporter.
+func (d deps) piIntegrationStatus() (string, bool) {
+	if d.integrationStatus == nil {
+		return "", false
+	}
+	timeout := d.socketTimeout
+	if timeout <= 0 {
+		timeout = defaultSocketTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	text, err := d.integrationStatus(ctx)
+	if err != nil {
+		return "", false
+	}
+	return text, true
 }
 
 func runGSRestoreRemove(d deps, args []string) int {
@@ -170,7 +202,7 @@ func runGSRestoreStatus(d deps, args []string) int {
 		}
 	}
 
-	status := gsrestore.Inspect(d.getenv, d.lookPath)
+	status := gsrestore.Inspect(d.getenv, d.lookPath, d.piIntegrationStatus)
 	if jsonOutput {
 		return report(gsrestore.WriteJSON(d.out, status), d.err)
 	}
@@ -234,6 +266,7 @@ func writeGSStatus(out io.Writer, status gsrestore.Status, getenv func(string) s
 	fmt.Fprintf(out, "%-13s %s\n", "agent dir:", describeGSAgentDir(status, getenv))
 	fmt.Fprintf(out, "%-13s %s\n", "reporter:", describeGSReporter(status))
 	fmt.Fprintf(out, "%-13s %s\n", "version:", describeGSVersion(status))
+	fmt.Fprintf(out, "%-13s %s\n", "integration:", describeGSIntegration(status))
 	fmt.Fprintf(out, "%-13s %s\n", "backup:", describeGSBackup(status))
 	fmt.Fprintf(out, "%-13s %s\n", "gentle-shell:", describeGSLauncher(status))
 }
@@ -294,6 +327,29 @@ func describeGSVersion(status gsrestore.Status) string {
 	default:
 		return fmt.Sprintf("differs (installed %s, shipped %s)", status.InstalledVersion, gsrestore.ReporterVersion())
 	}
+}
+
+func describeGSIntegration(status gsrestore.Status) string {
+	switch {
+	case status.TargetErr != nil:
+		return "unknown (no agent dir)"
+	case !status.Present:
+		return "no reporter installed"
+	case status.IntegrationVersion == 0:
+		return "no HERDR_INTEGRATION_VERSION marker"
+	case status.IntegrationExpected == 0:
+		return fmt.Sprintf("v%d (herdr did not report a pi version; written for v%d)",
+			status.IntegrationVersion, gsrestore.ShippedIntegrationVersion)
+	}
+	if status.IntegrationExpected == status.IntegrationVersion {
+		if status.IntegrationDiffers() {
+			return fmt.Sprintf("v%d (herdr expects v%d; written for v%d)",
+				status.IntegrationVersion, status.IntegrationExpected, gsrestore.ShippedIntegrationVersion)
+		}
+		return fmt.Sprintf("v%d (herdr expects v%d)", status.IntegrationVersion, status.IntegrationExpected)
+	}
+	return fmt.Sprintf("v%d (herdr expects v%d; run hs gs-restore install)",
+		status.IntegrationVersion, status.IntegrationExpected)
 }
 
 func describeGSBackup(status gsrestore.Status) string {

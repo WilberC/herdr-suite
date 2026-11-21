@@ -19,6 +19,8 @@
 // gentle-shell launcher with its saved session, the session identity is
 // re-reported every 5 seconds for 2 minutes, and live subagents keep the pane
 // in the working state.
+// HERDR_INTEGRATION_ID=pi
+// HERDR_INTEGRATION_VERSION=9
 // HERDR_SUITE_GS_RESTORE_VERSION=1
 
 import { spawnSync } from "node:child_process";

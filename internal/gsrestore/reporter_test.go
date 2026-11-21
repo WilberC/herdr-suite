@@ -66,3 +66,15 @@ func TestShippedReporterKeepsTheGentleShellResumeExecution(t *testing.T) {
 		t.Fatal("the shipped reporter drops the -- separator before --session")
 	}
 }
+
+func TestShippedReporterCarriesTheHerdrIntegrationMarker(t *testing.T) {
+	reporter := readReporter(t)
+
+	if !strings.Contains(reporter, IntegrationIDLine) {
+		t.Fatalf("the shipped reporter has no %q line; herdr reads it as its own pi integration", IntegrationIDLine)
+	}
+	if !strings.Contains(reporter, IntegrationVersionLine(ShippedIntegrationVersion)) {
+		t.Fatalf("the shipped reporter has no %q line; the install stamps it from the installed herdr",
+			IntegrationVersionLine(ShippedIntegrationVersion))
+	}
+}

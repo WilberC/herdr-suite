@@ -51,6 +51,7 @@ const (
 	CheckReporterVersion = "gs-restore version"
 	CheckBackup          = "gs-restore backup"
 	CheckLauncher        = "gs-restore launcher"
+	CheckIntegration     = "gs-restore integration"
 	CheckManifest        = "manifest"
 )
 
@@ -134,7 +135,7 @@ func Run(d Deps) Report {
 	defer cancel()
 
 	document, manifestPath, manifestErr := readManifest(d)
-	status := gsrestore.Inspect(d.Getenv, d.LookPath)
+	status := gsrestore.Inspect(d.Getenv, d.LookPath, herdrIntegrationProbe(ctx, d))
 	note := agentDirNote(d.Getenv)
 
 	return Report{
@@ -150,6 +151,7 @@ func Run(d Deps) Report {
 			checkReporterVersion(status, note),
 			checkBackup(status, note),
 			checkLauncher(status, note),
+			checkIntegration(status, note),
 			checkManifest(manifestPath, document, manifestErr),
 		},
 	}
@@ -472,6 +474,23 @@ func checkLauncher(status gsrestore.Status, note string) Check {
 	return warn(check, "gentle-shell is not on PATH; the installed reporter would report a launcher herdr cannot run")
 }
 
+// herdrIntegrationProbe asks the herdr a plugin action would run which pi
+// integration version it expects. A herdr that cannot answer leaves the marker
+// unknown instead of failing the report.
+func herdrIntegrationProbe(ctx context.Context, d Deps) gsrestore.Probe {
+	return func() (string, bool) {
+		bin, err := herdrBinary(d)
+		if err != nil || d.RunHerdr == nil {
+			return "", false
+		}
+		stdout, _, err := d.RunHerdr(ctx, bin, "integration", "status")
+		if err != nil {
+			return "", false
+		}
+		return string(stdout), true
+	}
+}
+
 // checkManifest reports the plugin manifest this installation ships.
 func checkManifest(path string, document manifest.Manifest, manifestErr error) Check {
 	check := Check{ID: CheckManifest}
@@ -502,4 +521,29 @@ func plural(count int, noun string) string {
 		return fmt.Sprintf("%d %s", count, noun)
 	}
 	return fmt.Sprintf("%d %ss", count, noun)
+}
+
+// checkIntegration reports the herdr pi integration marker the installed
+// reporter carries against the version the installed herdr expects. A herdr
+// that expects a version other than the shipped 9 is information: the same
+// reporter works, and the startup hook refreshes the number by itself.
+func checkIntegration(status gsrestore.Status, note string) Check {
+	check := Check{ID: CheckIntegration}
+	switch {
+	case status.TargetErr != nil:
+		return skip(check, "unknown: "+note)
+	case !status.Present:
+		return skip(check, "no reporter installed")
+	case status.IntegrationVersion == 0:
+		return warn(check, "no HERDR_INTEGRATION_VERSION marker in the installed file; run hs gs-restore install --force")
+	case status.IntegrationExpected == 0:
+		return skip(check, fmt.Sprintf("v%d installed; herdr did not report a pi version", status.IntegrationVersion))
+	case status.IntegrationVersion != status.IntegrationExpected:
+		return warn(check, fmt.Sprintf("installed v%d, herdr expects v%d; run hs gs-restore install",
+			status.IntegrationVersion, status.IntegrationExpected))
+	case status.IntegrationDiffers():
+		return pass(check, fmt.Sprintf("v%d matches herdr (written for v%d)",
+			status.IntegrationVersion, gsrestore.ShippedIntegrationVersion))
+	}
+	return pass(check, fmt.Sprintf("v%d matches herdr", status.IntegrationVersion))
 }

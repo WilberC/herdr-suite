@@ -326,3 +326,25 @@ func TestExecerSurfacesTheReplacementFailure(t *testing.T) {
 		t.Fatalf("Attach error = %v, want the exec failure", err)
 	}
 }
+
+const integrationStatusStub = `#!/bin/sh
+if [ "$1 $2" != "integration status" ]; then
+  echo "unexpected call: $*" >&2
+  exit 9
+fi
+printf 'pi: outdated (v9 < v10) (/tmp/extensions/herdr-agent-state.ts)\nclaude: current (v11) (/tmp/claude)\n'
+`
+
+func TestIntegrationStatusReturnsTheHerdrText(t *testing.T) {
+	t.Setenv(EnvBinary, writeStub(t, integrationStatusStub))
+
+	text, err := New().IntegrationStatus(context.Background())
+	if err != nil {
+		t.Fatalf("IntegrationStatus error = %v, want nil", err)
+	}
+
+	want := "pi: outdated (v9 < v10) (/tmp/extensions/herdr-agent-state.ts)\nclaude: current (v11) (/tmp/claude)\n"
+	if text != want {
+		t.Fatalf("IntegrationStatus = %q, want %q", text, want)
+	}
+}

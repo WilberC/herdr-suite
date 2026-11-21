@@ -31,17 +31,18 @@ hs doctor --json                # the whole report as one JSON document
 `hs doctor` reports the installation one line per check, and writes nothing:
 
 ```text
-PASS  herdr                herdr 0.9.5 at /usr/local/bin/herdr (min_herdr_version 0.7.5)
-PASS  socket               reachable · 3 sessions
-PASS  config               ~/.config/herdr/plugins/config/herdr-suite/config.json (missing) · gs_restore install off, auto_install off
-PASS  binary               0.2.0 matches herdr-plugin.toml
-PASS  layouts              ~/.config/herdr/herdr-suite/layouts · 2 layouts
-PASS  project              project /home/wilber/dotfiles · 1 layout
-SKIP  gs-restore reporter  not installed (feature default off)
-SKIP  gs-restore version   no reporter installed
-PASS  gs-restore backup    none
-SKIP  gs-restore launcher  not checked; no reporter installed
-PASS  manifest             ~/.local/share/herdr/plugins/herdr-suite/herdr-plugin.toml · Herd Suite 0.2.0 (min_herdr_version 0.7.5)
+PASS  herdr                  herdr 0.9.5 at /usr/local/bin/herdr (min_herdr_version 0.7.5)
+PASS  socket                 reachable · 3 sessions
+PASS  config                 ~/.config/herdr/plugins/config/herdr-suite/config.json (missing) · gs_restore install off, auto_install off
+PASS  binary                 0.2.0 matches herdr-plugin.toml
+PASS  layouts                ~/.config/herdr/herdr-suite/layouts · 2 layouts
+PASS  project                project /home/wilber/dotfiles · 1 layout
+SKIP  gs-restore reporter    not installed (feature default off)
+SKIP  gs-restore version     no reporter installed
+PASS  gs-restore backup      none
+SKIP  gs-restore launcher    not checked; no reporter installed
+SKIP  gs-restore integration  no reporter installed
+PASS  manifest               ~/.local/share/herdr/plugins/herdr-suite/herdr-plugin.toml · Herd Suite 0.2.0 (min_herdr_version 0.7.5)
 ```
 
 Every line prints `PASS`, `WARN`, `FAIL` or `SKIP`, and a failing line names the
@@ -56,7 +57,16 @@ the socket (a session list bounded by a three-second timeout, so a hung socket i
 a `FAIL` line and never a hanging report), the plugin config and its `gs_restore`
 toggles, this binary against the manifest version, the layout store and what the
 current directory declares (counts only, never a layout's contents), the GS
-session-restore files, and the plugin manifest itself.
+session-restore files and their herdr integration marker, and the plugin
+manifest itself.
+
+The `gs-restore integration` line prints the `HERDR_INTEGRATION_VERSION` marker
+the installed reporter carries and the version the installed herdr expects. A
+herdr that expects a version other than the shipped `9` is information —
+`PASS gs-restore integration v10 matches herdr (written for v9)` — and a marker
+that no longer matches herdr is a warning with the fix
+(`run hs gs-restore install`); neither fails the report, so a newer herdr keeps
+`hs doctor` green.
 
 ## Exit codes
 

@@ -24,12 +24,34 @@ type Status struct {
 	VersionMatches   bool
 	Backup           string
 
+	// IntegrationVersion is the version marker in the installed reporter, and
+	// IntegrationExpected the pi version the installed herdr reports it expects.
+	// Zero means the file has no marker, or herdr was not asked or named none.
+	IntegrationVersion  int
+	IntegrationExpected int
+
 	GentleShell string
 }
 
+// Probe reports what the installed herdr says about its own integrations: the
+// text of "herdr integration status", and false when herdr could not be asked
+// at all. The caller bounds the call; this package runs no commands itself, so
+// the tests stay offline.
+type Probe func() (text string, ok bool)
+
+// IntegrationDiffers reports whether herdr expects a pi integration version
+// other than the one the shipped reporter was written for. It is information,
+// never a failure: herdr reads the marker from the installed file, so a newer
+// herdr is satisfied by the same reporter with a different number.
+func (status Status) IntegrationDiffers() bool {
+	return status.IntegrationExpected != 0 && status.IntegrationExpected != ShippedIntegrationVersion
+}
+
 // Inspect reads the config, the agent directory and the installed reporter.
-// lookPath is exec.LookPath in production and a PATH-backed lookup in tests.
-func Inspect(getenv func(string) string, lookPath func(string) (string, error)) Status {
+// lookPath is exec.LookPath in production and a PATH-backed lookup in tests, and
+// probe asks the installed herdr which pi integration version it expects; a nil
+// probe leaves the integration version unknown.
+func Inspect(getenv func(string) string, lookPath func(string) (string, error), probe Probe) Status {
 	status := Status{}
 
 	if path, err := ConfigPath(getenv); err != nil {
@@ -57,8 +79,17 @@ func Inspect(getenv func(string) string, lookPath func(string) (string, error)) 
 				status.InstalledVersion = version
 				status.VersionMatches = version == ReporterVersion()
 			}
+			status.IntegrationVersion, _ = integrationVersionOf(data)
 		}
 		status.Backup = LatestBackup(target.Path)
+	}
+
+	if probe != nil {
+		if text, ok := probe(); ok {
+			if version, ok := ParseIntegrationVersion(text); ok {
+				status.IntegrationExpected = version
+			}
+		}
 	}
 
 	if lookPath != nil {
@@ -93,6 +124,11 @@ type StatusDocument struct {
 	ShippedVersion string `json:"shipped_version"`
 	Backup         string `json:"backup,omitempty"`
 	GentleShell    string `json:"gentle_shell,omitempty"`
+
+	IntegrationVersion  int  `json:"integration_version,omitempty"`
+	IntegrationExpected int  `json:"integration_expected,omitempty"`
+	IntegrationShipped  int  `json:"integration_shipped"`
+	IntegrationDiffers  bool `json:"integration_differs"`
 }
 
 // Document is the machine-readable form of this Status, the document
@@ -110,6 +146,11 @@ func (status Status) Document() StatusDocument {
 		ShippedVersion:    ReporterVersion(),
 		Backup:            status.Backup,
 		GentleShell:       status.GentleShell,
+
+		IntegrationVersion:  status.IntegrationVersion,
+		IntegrationExpected: status.IntegrationExpected,
+		IntegrationShipped:  ShippedIntegrationVersion,
+		IntegrationDiffers:  status.IntegrationDiffers(),
 	}
 	if status.ConfigErr != nil {
 		document.ConfigError = status.ConfigErr.Error()

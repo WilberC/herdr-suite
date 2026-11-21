@@ -181,6 +181,10 @@ type deps struct {
 	executable func() (string, error)
 	// herdrRun runs the herdr binary for the doctor's version probe.
 	herdrRun func(ctx context.Context, bin string, args ...string) (stdout, stderr []byte, err error)
+	// integrationStatus runs "herdr integration status" for the GS reporter's
+	// herdr marker. A failure is not an install failure: the shipped default is
+	// used instead.
+	integrationStatus func(ctx context.Context) (string, error)
 	// socketTimeout bounds every herdr probe the doctor makes.
 	socketTimeout time.Duration
 }
@@ -214,6 +218,7 @@ func defaultDeps(stdout, stderr io.Writer) deps {
 		out:            stdout,
 		err:            stderr,
 	}
+	d.integrationStatus = herdr.IntegrationStatus
 	if d.interactive {
 		d.confirm = session.TerminalConfirmer(os.Stdin, stderr)
 	}

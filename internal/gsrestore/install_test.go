@@ -25,7 +25,7 @@ func testTarget(t *testing.T) Target {
 }
 
 func reporterFixture() []byte {
-	return []byte(ReporterVersionLine + "\n// shipped reporter body\n")
+	return []byte(IntegrationIDLine + "\n" + IntegrationVersionLine(ShippedIntegrationVersion) + "\n" + ReporterVersionLine + "\n// shipped reporter body\n")
 }
 
 func backupsOf(t *testing.T, path string) []string {

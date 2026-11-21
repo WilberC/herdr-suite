@@ -38,20 +38,48 @@ and only when that directory exists and holds an `extensions/` directory; a
 vanilla pi installation has no such variable, so the feature simply does not
 apply there.
 
+**herdr's integration marker.** herdr decides whether an integration file is
+current by reading a `// HERDR_INTEGRATION_VERSION=<n>` line from it, where
+`<n>` is the pi integration version that herdr ships; `herdr integration status`
+prints one line per agent, as `pi: current (v9)`, `pi: outdated (v9 < v10)`,
+`pi: outdated (legacy < v10)` or `pi: not installed`. The shipped reporter
+carries `// HERDR_INTEGRATION_ID=pi` and the marker with the version it was
+written for — `9`, the pi integration of herdr 0.9.5 — and every install
+stamps the version the installed herdr expects: the right-hand number of
+`< vN`, or the only number of `current (vN)`. herdr never rewrites the file on
+its own, which is why hs writes it, and why the `[[startup]]` hook refreshes it
+on every server start: a reporter whose marker differs from what herdr now
+expects is rewritten (its previous copy becomes the single backup) and prints
+the install line; a reporter whose marker already matches is left alone and
+prints nothing. When herdr cannot be run, prints no pi version (`not installed`,
+`needs repair (vN)`) or prints something unparseable, the install keeps the
+shipped `9` and says nothing — a missing or broken herdr never fails an install
+or a server start. Official herdr then reports `pi: current` with no local
+patch.
+
 ```bash
 hs gs-restore install          # install or refresh the reporter
 hs gs-restore install --force  # replace a file that is not a herdr reporter
 hs gs-restore remove           # restore the latest backup, or delete the file
-hs gs-restore status           # reporter, version marker, backup, launcher, toggles
+hs gs-restore status           # reporter, version and herdr markers, backup, launcher, toggles
 hs gs-restore status --json    # the same report as one JSON document
 ```
+
+`status` prints one `integration:` line for the herdr marker — the installed
+version and the one herdr expects, as `v9 (herdr expects v9)`, and
+`v10 (herdr expects v10; written for v9)` when the installed herdr expects a
+version other than the shipped `9`. That difference is information: the marker
+is what herdr reads, so the same reporter is current there and neither the line
+nor the exit status reports a failure.
 
 `status --json` prints one document carrying the same values as the human lines —
 `config_path` and `config_present`, `install` and `auto_install`, `agent_dir`,
 `reporter_path`, `reporter_present`, `reporter_installed`, `reporter_version`,
-`version_matches`, `shipped_version`, `backup` and `gentle_shell` — plus
-`config_error` and `agent_dir_error` when the environment does not provide the
-value, so a script reads the report without parsing its prose.
+`version_matches`, `shipped_version`, `backup` and `gentle_shell`, plus
+`integration_version`, `integration_expected` (numbers, omitted when unknown),
+`integration_shipped` and `integration_differs` — plus `config_error` and
+`agent_dir_error` when the environment does not provide the value, so a script
+reads the report without parsing its prose.
 
 An existing herdr pi integration is backed up next to the file before it is
 replaced, as `<name>.bak-<timestamp>`; repeated installs keep that single backup

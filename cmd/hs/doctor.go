@@ -15,8 +15,9 @@ const doctorUsage = `usage: hs doctor [options]
 Report the health of this hs installation, one line per check: the herdr binary
 and its version against min_herdr_version, the herdr socket, the plugin config
 and its gs_restore toggles, this binary against the manifest version, the layout
-store and what the current directory declares, the GS session-restore files, and
-the plugin manifest itself. Nothing is written.
+store and what the current directory declares, the GS session-restore files and
+their herdr integration marker, and the plugin manifest itself. Nothing is
+written.
 
 Each line prints PASS, WARN, FAIL or SKIP, and a failing line names the fix. The
 exit status is 0 when nothing failed and 1 when any line failed, so a warning
